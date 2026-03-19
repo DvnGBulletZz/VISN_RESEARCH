@@ -1,25 +1,23 @@
 # data_loader.py
-# Responsible for:
-#   - Reading the annotation CSVs from both dataset sets
-#   - Filtering out the 'board' class (set2)
-#   - Normalising class labels via CLASS_MAP
-#   - Cropping individual piece patches from source images
-#   - Saving a bounding box visualisation to verify crops are correct
-#   - Plotting and saving the class distribution chart
+# Loads full board images with all their annotations.
+# No more patch cropping — the full image goes into the model.
 
 import os
 import cv2
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")  # Non-interactive backend — no window is opened
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
 from tqdm import tqdm
 
-from config import *
-
+from config import (
+    SPLITS, CLASS_MAP, CLASS_NAMES,
+    IMG_HEIGHT, IMG_WIDTH,
+    PLOTS_DIR, RUN_ID,
+)
 
 
 def load_annotations(csv_path: str, image_dir: str) -> pd.DataFrame:
@@ -55,15 +53,23 @@ def load_all_annotations(split: str = "train") -> pd.DataFrame:
     return combined
 
 
-def crop_patches(df: pd.DataFrame) -> tuple[list, list]:
-    """Crops bounding box patches from source images and returns (images, labels)."""
-    images = []
-    labels = []
-    missing = 0
+def load_images(df: pd.DataFrame) -> tuple[list, list]:
+    """
+    Loads full board images and their annotation boxes.
+    Returns one entry per unique image, each with a list of all its boxes.
 
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Cropping patches"):
-        img_path = row['image_path']
+    Returns:
+        images     : list of np.ndarray (IMG_HEIGHT, IMG_WIDTH, 3), dtype uint8
+        annotations: list of lists, each inner list contains dicts with
+                     keys: class, xmin, ymin, xmax, ymax (scaled to IMG size)
+    """
+    images      = []
+    annotations = []
+    missing     = 0
 
+    unique_paths = df['image_path'].unique()
+
+    for img_path in tqdm(unique_paths, desc="Loading images"):
         if not os.path.exists(img_path):
             missing += 1
             continue
@@ -74,70 +80,69 @@ def crop_patches(df: pd.DataFrame) -> tuple[list, list]:
             continue
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        orig_h, orig_w = img.shape[:2]
 
-        h, w = img.shape[:2]
-        xmin = max(0, int(row['xmin']))
-        ymin = max(0, int(row['ymin']))
-        xmax = min(w,  int(row['xmax']))
-        ymax = min(h,  int(row['ymax']))
+        # Scale factors to adjust box coordinates after resize
+        scale_x = IMG_WIDTH  / orig_w
+        scale_y = IMG_HEIGHT / orig_h
 
-        if xmax <= xmin or ymax <= ymin:
-            continue
+        img = cv2.resize(img, (IMG_WIDTH, IMG_HEIGHT))
 
-        patch = img[ymin:ymax, xmin:xmax]
-        patch = cv2.resize(patch, (IMG_WIDTH, IMG_HEIGHT))
+        # Collect all boxes for this image and scale their coordinates
+        rows = df[df['image_path'] == img_path]
+        boxes = []
+        for _, row in rows.iterrows():
+            boxes.append({
+                'class': row['class'],
+                'xmin':  int(row['xmin'] * scale_x),
+                'ymin':  int(row['ymin'] * scale_y),
+                'xmax':  int(row['xmax'] * scale_x),
+                'ymax':  int(row['ymax'] * scale_y),
+            })
 
-        images.append(patch)
-        labels.append(row['class'])
+        images.append(img)
+        annotations.append(boxes)
 
     if missing > 0:
-        print(f"  [WARNING] {missing} image files could not be read and were skipped.")
+        print(f"  [WARNING] {missing} images could not be read and were skipped.")
 
-    print(f"[data_loader] Loaded {len(images)} patches total.")
-    return images, labels
+    print(f"[data_loader] Loaded {len(images)} images total.")
+    return images, annotations
 
 
-def plot_bbox_verification(images: list, labels: list, n_patches: int = 16):
+def plot_bbox_verification(images: list, annotations: list, n_images: int = 4):
     """
-    Saves a grid of resized 64x64 patches with a bounding box drawn around
-    each one so you can verify the crop and resize came out correctly.
-
-    Args:
-        images   : list of resized patches from crop_patches()
-        labels   : matching class labels
-        n_patches: how many patches to show in the grid
+    Saves a grid of full board images with all bounding boxes drawn on them
+    after resize so you can verify the box scaling is correct.
     """
     os.makedirs(PLOTS_DIR, exist_ok=True)
 
-    n = min(n_patches, len(images))
-    cols = 8
-    rows = (n + cols - 1) // cols
+    n = min(n_images, len(images))
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 5))
+    if n == 1:
+        axes = [axes]
 
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 1.5, rows * 1.5))
-    axes = np.array(axes).flatten()
-
-    for i in range(len(axes)):
-        ax = axes[i]
-        if i < n:
-            ax.imshow(images[i])
-
-            # Draw a box around the full patch — the patch IS the crop so the
-            # box confirms the resize kept the piece roughly centred
+    for ax, img, boxes in zip(axes, images[:n], annotations[:n]):
+        ax.imshow(img)
+        for box in boxes:
+            xmin, ymin = box['xmin'], box['ymin']
+            w = box['xmax'] - xmin
+            h = box['ymax'] - ymin
             rect = mpatches.Rectangle(
-                (0, 0), IMG_WIDTH - 1, IMG_HEIGHT - 1,
+                (xmin, ymin), w, h,
                 linewidth=1.5, edgecolor='lime', facecolor='none'
             )
             ax.add_patch(rect)
-            ax.set_title(labels[i], fontsize=6)
+            ax.text(xmin, ymin - 4, box['class'], color='lime', fontsize=6)
         ax.axis('off')
 
-    plt.suptitle(f"Patch verification after crop & resize (run {RUN_ID})", fontsize=10)
+    plt.suptitle(f"Bounding box verification after resize (run {RUN_ID})", fontsize=10)
     plt.tight_layout()
 
     save_path = os.path.join(PLOTS_DIR, f"bbox_verification_run{RUN_ID}.png")
     plt.savefig(save_path, dpi=150)
     plt.close()
-    print(f"[data_loader] Patch verification saved → {save_path}")
+    print(f"[data_loader] Bounding box verification saved → {save_path}")
 
 
 def plot_class_distribution(df: pd.DataFrame, split: str = "train"):
