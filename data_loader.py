@@ -4,7 +4,8 @@
 #   - Filtering out the 'board' class (set2)
 #   - Normalising class labels via CLASS_MAP
 #   - Cropping individual piece patches from source images
-#   - Returning a flat list of (image_array, label) tuples ready for preprocessing
+#   - Saving a bounding box visualisation to verify crops are correct
+#   - Plotting and saving the class distribution chart
 
 import os
 import cv2
@@ -13,62 +14,32 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # Non-interactive backend — no window is opened
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import seaborn as sns
 from tqdm import tqdm
 
-from config import (
-    SPLITS,
-    CLASS_MAP, CLASS_NAMES,
-    IMG_HEIGHT, IMG_WIDTH,
-    PLOTS_DIR, RUN_ID,
-)
+from config import *
+
 
 
 def load_annotations(csv_path: str, image_dir: str) -> pd.DataFrame:
-    """
-    Load a single annotation CSV and attach the full image path.
-
-    Args:
-        csv_path  : Path to _annotations.csv
-        image_dir : Directory that contains the image files
-
-    Returns:
-        DataFrame with columns:
-            filename, width, height, class, xmin, ymin, xmax, ymax, image_path
-        Rows with class == 'board' are dropped.
-        Classes are normalised to full names via CLASS_MAP.
-        Rows whose class is not in CLASS_MAP are also dropped.
-    """
+    """Reads one annotation CSV, drops 'board' rows and normalises class names."""
     df = pd.read_csv(csv_path)
 
-    # Drop the 'board' background annotation that only exists in set2
     df = df[df['class'] != 'board'].copy()
-
-    # Normalise short abbreviations to full class names
     df['class'] = df['class'].map(CLASS_MAP)
 
-    # Drop any row where the class was not recognised
     n_unknown = df['class'].isna().sum()
     if n_unknown > 0:
         print(f"  [WARNING] Dropped {n_unknown} rows with unknown class in {csv_path}")
     df = df.dropna(subset=['class'])
 
-    # Build the full path to each image file
     df['image_path'] = df['filename'].apply(lambda f: os.path.join(image_dir, f))
-
     return df
 
 
 def load_all_annotations(split: str = "train") -> pd.DataFrame:
-    """
-    Load and combine annotations for a given split from both dataset sets.
-
-    Args:
-        split : One of 'train', 'valid', 'test' — must match a key in SPLITS
-
-    Returns:
-        Single combined DataFrame for the requested split.
-    """
+    """Loads and combines annotations from both datasets for the given split."""
     if split not in SPLITS:
         raise ValueError(f"Unknown split '{split}'. Choose from: {list(SPLITS.keys())}")
 
@@ -85,20 +56,7 @@ def load_all_annotations(split: str = "train") -> pd.DataFrame:
 
 
 def crop_patches(df: pd.DataFrame) -> tuple[list, list]:
-    """
-    For every annotation row, open the source image and crop the bounding box
-    to produce a small patch for that chess piece.
-
-    Patches are resized to (IMG_HEIGHT, IMG_WIDTH) and converted to RGB.
-    Images that cannot be read from disk are skipped with a warning.
-
-    Args:
-        df : DataFrame returned by load_all_annotations()
-
-    Returns:
-        images : list of np.ndarray, shape (IMG_HEIGHT, IMG_WIDTH, 3), dtype uint8
-        labels : list of str, matching class label for each image patch
-    """
+    """Crops bounding box patches from source images and returns (images, labels)."""
     images = []
     labels = []
     missing = 0
@@ -115,17 +73,14 @@ def crop_patches(df: pd.DataFrame) -> tuple[list, list]:
             missing += 1
             continue
 
-        # Convert BGR (OpenCV default) to RGB
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        # Clamp bounding box to image dimensions to avoid out-of-bounds crops
         h, w = img.shape[:2]
         xmin = max(0, int(row['xmin']))
         ymin = max(0, int(row['ymin']))
         xmax = min(w,  int(row['xmax']))
         ymax = min(h,  int(row['ymax']))
 
-        # Skip degenerate boxes
         if xmax <= xmin or ymax <= ymin:
             continue
 
@@ -142,15 +97,51 @@ def crop_patches(df: pd.DataFrame) -> tuple[list, list]:
     return images, labels
 
 
-def plot_class_distribution(df: pd.DataFrame, split: str = "train"):
+def plot_bbox_verification(images: list, labels: list, n_patches: int = 16):
     """
-    Save a bar chart of annotation counts per class to the plots directory.
-    The plot is never shown on screen — it is only written to disk.
+    Saves a grid of resized 64x64 patches with a bounding box drawn around
+    each one so you can verify the crop and resize came out correctly.
 
     Args:
-        df    : Combined annotations DataFrame from load_all_annotations()
-        split : Split name used in the chart title and filename
+        images   : list of resized patches from crop_patches()
+        labels   : matching class labels
+        n_patches: how many patches to show in the grid
     """
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+
+    n = min(n_patches, len(images))
+    cols = 8
+    rows = (n + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 1.5, rows * 1.5))
+    axes = np.array(axes).flatten()
+
+    for i in range(len(axes)):
+        ax = axes[i]
+        if i < n:
+            ax.imshow(images[i])
+
+            # Draw a box around the full patch — the patch IS the crop so the
+            # box confirms the resize kept the piece roughly centred
+            rect = mpatches.Rectangle(
+                (0, 0), IMG_WIDTH - 1, IMG_HEIGHT - 1,
+                linewidth=1.5, edgecolor='lime', facecolor='none'
+            )
+            ax.add_patch(rect)
+            ax.set_title(labels[i], fontsize=6)
+        ax.axis('off')
+
+    plt.suptitle(f"Patch verification after crop & resize (run {RUN_ID})", fontsize=10)
+    plt.tight_layout()
+
+    save_path = os.path.join(PLOTS_DIR, f"bbox_verification_run{RUN_ID}.png")
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"[data_loader] Patch verification saved → {save_path}")
+
+
+def plot_class_distribution(df: pd.DataFrame, split: str = "train"):
+    """Saves a bar chart of annotation counts per class."""
     class_counts = df['class'].value_counts().reindex(CLASS_NAMES, fill_value=0)
 
     fig, ax = plt.subplots(figsize=(12, 5))
@@ -161,7 +152,6 @@ def plot_class_distribution(df: pd.DataFrame, split: str = "train"):
     ax.set_ylabel("Number of annotations")
     ax.tick_params(axis='x', rotation=45)
 
-    # Count labels on top of each bar
     for bar, count in zip(ax.patches, class_counts.values):
         ax.text(
             bar.get_x() + bar.get_width() / 2,

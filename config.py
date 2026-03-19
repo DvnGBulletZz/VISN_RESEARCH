@@ -4,6 +4,13 @@
 
 import os
 
+
+# ─── Run identifier ───────────────────────────────────────────────────────────
+# Bump this manually before each new training run so output files
+# (plots, weights) are never overwritten.
+
+RUN_ID = 1
+
 # ─── Base directories ─────────────────────────────────────────────────────────
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +61,7 @@ SPLITS = {
 # ─── Output directories ───────────────────────────────────────────────────────
 
 OUTPUT_DIR  = _p("outputs")
-PLOTS_DIR   = _p("outputs", "plots")
+PLOTS_DIR   = _p("outputs", "plots", f"run{RUN_ID}")
 MODELS_DIR  = _p("outputs", "models")
 
 # ─── Image settings ───────────────────────────────────────────────────────────
@@ -93,8 +100,3 @@ LEARNING_RATE    = 1e-3
 VALIDATION_SPLIT = 0.2
 RANDOM_SEED      = 42
 
-# ─── Run identifier ───────────────────────────────────────────────────────────
-# Bump this manually before each new training run so output files
-# (plots, weights) are never overwritten.
-
-RUN_ID = 1
