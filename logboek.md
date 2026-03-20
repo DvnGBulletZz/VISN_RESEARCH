@@ -212,22 +212,65 @@ Voordat verder gegaan wordt met experimenteren, eerst een overzicht van wat er n
 
 ### Grid grootte verhoogd + confidence weging
 
-**Wat:** `GRID_S` van 7 naar 14. Laatste MaxPool verwijderd zodat de feature map 14×14 blijft. Obj/noobj gewogen confidence loss toegevoegd — cellen met een stuk ×10, lege cellen ×0.5.
-**Waarom:** bij een 7×7 grid deelden meerdere stukken regelmatig dezelfde cel. In `encode_targets` wint de laatste — de andere verdwijnt uit de targets en het model leert hem nooit. Met 14×14 = 196 cellen voor maximaal 32 stukken heeft elk stuk ruimschoots zijn eigen cel. De confidence weging dwingt het model hogere confidence te leren voor cellen met een stuk.
+**Wat:** `GRID_S` van 7 naar 14. Laatste MaxPool verwijderd zodat de feature map 14×14 blijft. Obj/noobj gewogen confidence loss — cellen met een stuk ×10, lege cellen ×0.5.
+**Waarom:** bij een 7×7 grid deelden meerdere stukken regelmatig dezelfde cel. In `encode_targets` wint de laatste — de andere verdwijnt uit de targets en het model leert hem nooit. Met 14×14 = 196 cellen voor maximaal 32 stukken heeft elk stuk ruimschoots zijn eigen cel.
 
 ![Training](outputs/plots/run7/training_run7.png)
-> Accuracy ~7-8% is laag en moet veder kijken waarom dit gebeurd
+> Loss daalt stabiel. Accuracy ~7-8% — misleidend door de grote hoeveelheid lege cellen in het grid die allemaal correct als 0 worden voorspeld. De mAP is de relevante metric.
 
 ![Confusion matrix](outputs/plots/run7/confusion_matrix_run7.png)
-> Diagonaal zeer sterk voor alle classes. Bijna geen verwarring meer tussen classes. Merkbaar beter dan run 6.
+> Diagonaal zeer sterk voor alle classes.
 
 ![MAE](outputs/plots/run7/mae_run7.png)
-> x ~0.10, y ~0.10 — goed. w ~0.19 en h ~0.39 zijn hoger dan verwacht. De w/h encoding werkt minder goed bij de grotere grid omdat de cel-relatieve schaal veranderd is.
+> x ~0.10, y ~0.10. h ~0.39 was te hoog — encoding schaalprobleem.
 
 ![mAP](outputs/plots/run7/map_run7.png)
-> mAP = 0.904 bij IoU 0.3 — grootste sprong tot nu toe van 0.766 naar 0.904. Bijna alle classes boven 0.88. `black-knight`, `white-king` en `white-knight` scoren 1.0. `white-bishop` (0.80) en `black-bishop` (0.73) zijn de laagste maar nog altijd acceptabel.
+> mAP = 0.904 bij IoU 0.3. Grootste sprong tot nu toe. Bijna alle classes boven 0.88.
 
 ![Predictions](outputs/plots/run7/predictions_run7.png)
-> Eerste image detecteert bijna alles correct met boxes die redelijk om de stukken heen zitten. Tweede image detecteert alle queens correct. De h MAE van 0.39 is zichtbaar — boxes zijn soms te hoog of te laag.
+> Eerste image detecteert bijna alles. Boxes te klein door incorrecte w/h schaal in decode.
 
-**Conclusie:** grid vergroting heeft het conflictprobleem opgelost. mAP van 0.766 naar 0.904. Resterende probleem is de h-fout die boxes verticaal te groot of klein maakt.
+### w/h encoding en decode gecorrigeerd
+
+**Wat:** w/h worden geëncodeerd als `w * 7` (vaste schaal). Decode is `w_pred / 7`. w/h loss weging verlaagd van ×5 naar ×1.
+**Waarom:** met GRID_S=14 gaf `w * GRID_S` targets >1.0 die sigmoid afkapte — het model kon de juiste boxgrootte nooit voorspellen. Door de schaal vast op 7 te zetten blijven targets ~0.9. Eerdere decode deed `w_pred² / 7` wat kwadrateert zonder dat er ooit een sqrt was gedaan — dat geeft veel te kleine boxes. Fix: gewoon `w_pred / 7`.
+
+![Training](outputs/plots/run8/training_run8.png)
+> Loss daalt stabiel naar ~0.02. Accuracy ~14% — hoger dan run 7 door de betere w/h loss balans.
+
+![MAE](outputs/plots/run8/mae_run8.png)
+> x ~0.096, y ~0.110, w ~0.089, h ~0.144. h nog iets te hoog maar significant verbeterd ten opzichte van run 7 (~0.39).
+
+![mAP](outputs/plots/run8/map_run8.png)
+> mAP gedaald naar 0.552 — de lagere w/h weging heeft de boxgrootte verbeterd maar de IoU per box is slechter geworden omdat het model minder gefocust traint op coördinaten.
+
+![Predictions](outputs/plots/run8/predictions_run8.png)
+> Boxes zijn zichtbaar groter dan run 7 en zitten beter om de stukken. Nog steeds niet perfect gecentreerd maar de verhouding klopt beter.
+
+**Conclusie:** de decode fix heeft de boxgrootte verbeterd. mAP lager door de verlaagde w/h weging. Volgende stap: w/h weging terugzetten en kijken of mAP en boxgrootte beide goed zijn.
+
+
+
+---
+
+## Dag 5 — 20/03/26
+
+### Sqrt encoding voor w/h
+
+**Wat:** w en h worden nu opgeslagen als `sqrt(w × GRID_S)` in plaats van `w × GRID_S`. Bij decode wordt gekwadrateerd.
+**Waarom:** de h-fout van 0.39 in run 7 wees op slechte boxhoogte voorspellingen. Met lineaire encoding weegt een fout van 0.1 op een kleine box (h=0.1) even zwaar als op een grote box (h=0.9). Sqrt encoding maakt kleine fouten op kleine boxes relatief zwaarder — het model wordt harder gestraft voor het verkeerd schatten van kleine stukken.
+
+![Training](outputs/plots/run8/training_run8.png)
+>
+
+![Confusion matrix](outputs/plots/run8/confusion_matrix_run8.png)
+>
+
+![MAE](outputs/plots/run8/mae_run8.png)
+>
+
+![mAP](outputs/plots/run8/map_run8.png)
+>
+
+![Predictions](outputs/plots/run8/predictions_run8.png)
+>
