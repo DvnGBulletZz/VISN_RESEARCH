@@ -5,7 +5,7 @@ from data_loader import load_all_annotations, load_images, plot_class_distributi
 from preprocessing import preprocess
 from model import build_model
 from train import train
-from evaluate import plot_confusion_matrix, plot_mae
+from evaluate import plot_confusion_matrix, plot_mae, plot_map
 from predict import plot_predictions
 import tensorflow as tf
 
@@ -44,6 +44,7 @@ def main():
  
     plot_confusion_matrix(model, X_test, test_ann)
     plot_mae(model, X_test, test_ann)
+    plot_map(model, X_test, test_ann)
     plot_predictions(model, X_test, n=2)
  
  

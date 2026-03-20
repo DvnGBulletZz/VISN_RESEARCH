@@ -3,10 +3,9 @@
 
 import os
 
-
 # ─── Run identifier ───────────────────────────────────────────────────────────
 
-RUN_ID = 1
+RUN_ID = 5
 
 # ─── Base directories ─────────────────────────────────────────────────────────
 
@@ -32,40 +31,25 @@ DS2_TRAIN_CSV   = os.path.join(DS2_TRAIN_DIR, "_annotations.csv")
 DS2_VALID_CSV   = os.path.join(DS2_VALID_DIR, "_annotations.csv")
 DS2_TEST_CSV    = os.path.join(DS2_TEST_DIR,  "_annotations.csv")
 
-# All splits as (csv_path, image_dir) pairs grouped by split name
 SPLITS = {
-    "train": [
-        (DS1_TRAIN_CSV, DS1_TRAIN_DIR),
-        (DS2_TRAIN_CSV, DS2_TRAIN_DIR),
-    ],
-    "valid": [
-        (DS1_VALID_CSV, DS1_VALID_DIR),
-        (DS2_VALID_CSV, DS2_VALID_DIR),
-    ],
-    "test": [
-        (DS1_TEST_CSV, DS1_TEST_DIR),
-        (DS2_TEST_CSV, DS2_TEST_DIR),
-    ],
+    "train": [(DS1_TRAIN_CSV, DS1_TRAIN_DIR), (DS2_TRAIN_CSV, DS2_TRAIN_DIR)],
+    "valid": [(DS1_VALID_CSV, DS1_VALID_DIR), (DS2_VALID_CSV, DS2_VALID_DIR)],
+    "test":  [(DS1_TEST_CSV,  DS1_TEST_DIR),  (DS2_TEST_CSV,  DS2_TEST_DIR)],
 }
 
 # ─── Output directories ───────────────────────────────────────────────────────
 
 OUTPUT_DIR  = _p("outputs")
-PLOTS_DIR   = _p("outputs", "plots", f"run1")   # updated per RUN_ID at runtime
+PLOTS_DIR   = _p("outputs", "plots", f"run{RUN_ID}")
 MODELS_DIR  = _p("outputs", "models")
 
 # ─── Image settings ───────────────────────────────────────────────────────────
-# Full board images are resized to this before going into the model
 
 IMG_HEIGHT   = 224
 IMG_WIDTH    = 224
 IMG_CHANNELS = 3
 
 # ─── Detection grid ───────────────────────────────────────────────────────────
-# The image is divided into a GRID_S x GRID_S grid.
-# Each cell predicts one bounding box + class probabilities.
-# Output tensor per image: (GRID_S, GRID_S, 5 + NUM_CLASSES)
-#   where 5 = [x, y, w, h, confidence]
 
 GRID_S = 7
 
@@ -90,7 +74,6 @@ NUM_CLASSES  = len(CLASS_NAMES)
 # ─── Training hyperparameters ─────────────────────────────────────────────────
 
 BATCH_SIZE       = 16
-EPOCHS           = 30
-LEARNING_RATE    = 1e-3
+EPOCHS           = 200
+LEARNING_RATE    = 1e-4
 RANDOM_SEED      = 42
-
