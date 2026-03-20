@@ -26,9 +26,9 @@ def predict_boxes(model, image: np.ndarray, conf_threshold: float = 0.5) -> list
             cx, cy, w_cell, h_cell = pred[row, col, :4]
             cx = (col + cx) / GRID_S * IMG_WIDTH
             cy = (row + cy) / GRID_S * IMG_HEIGHT
-            # w and h were encoded as w*GRID_S — divide back to get pixels
-            w  = (w_cell / GRID_S) * IMG_WIDTH
-            h  = (h_cell / GRID_S) * IMG_HEIGHT
+            # w/h encoded as w*7 — divide by 7 to get image fraction
+            w  = (w_cell / 7) * IMG_WIDTH
+            h  = (h_cell / 7) * IMG_HEIGHT
             class_idx  = np.argmax(pred[row, col, 5:])
             class_name = label_encoder.inverse_transform([class_idx])[0]
             boxes.append({

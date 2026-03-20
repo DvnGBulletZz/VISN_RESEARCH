@@ -112,11 +112,11 @@ def plot_map(model, X_test, test_ann, iou_threshold=0.3):
                 # decode cell-relative w/h back to image fractions for IoU
                 t = y_true[i, row, col, :4].copy()
                 p = y_pred[i, row, col, :4].copy()
-                # decode cell-relative cx/cy and cell-relative w/h
+                # decode cell-relative cx/cy and sqrt-encoded w/h
                 t[0] = (col + t[0]) / GRID_S; t[1] = (row + t[1]) / GRID_S
                 p[0] = (col + p[0]) / GRID_S; p[1] = (row + p[1]) / GRID_S
-                t[2] /= GRID_S; t[3] /= GRID_S
-                p[2] /= GRID_S; p[3] /= GRID_S
+                t[2] = t[2] / 7;  t[3] = t[3] / 7
+                p[2] = p[2] / 7;  p[3] = p[3] / 7
                 iou = _compute_iou(t, p)
                 tp = 1 if (iou >= iou_threshold and pred_cls == true_cls) else 0
                 class_results[true_cls].append((conf, tp))

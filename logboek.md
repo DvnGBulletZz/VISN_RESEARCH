@@ -54,31 +54,7 @@ Input: 224×224×3 → Output: `(7, 7, 17)` — één voorspelling per grid cel.
 
 ## Dag 2 — 19/03/26
 
-### Training
-
-Trainingsloop toegevoegd. De annotations worden in `train.py` omgezet naar grid tensors zodat de target encoding en de loss functie op dezelfde plek zitten.
-
-**Loss functie**  
-Standaard losses werken hier niet omdat de output drie verschillende dingen bevat die elk apart behandeld moeten worden:
-
-| Deel | Loss | Waarom |
-|------|------|--------|
-| Box coördinaten (x, y, w, h) | MSE | Alleen berekend waar een object zit |
-| Confidence | MSE | Dataset bevat alleen images met stukken, geen lege achtergronden — binary crossentropy voegt hier niets toe |
-| Class scores | Categorical crossentropy | Alleen berekend waar een object zit |
-
-**Checkpoints**  
-Model wordt opgeslagen via `ModelCheckpoint` op basis van de laagste validatie loss. Alleen het beste model wordt bewaard als `best_model_run{RUN_ID}.h5`.
-
-### Evaluatie & voorspellingen
-
-`evaluate.py` — draait op de test set na training:
-- Confusion matrix per class via seaborn heatmap
-- MAE per box coördinaat (x, y, w, h) — alleen berekend op cellen waar een object zit
-
-`predict.py` — toont 2 voorbeeldimages met de voorspelde bounding boxes erop getekend inclusief class naam en confidence score.
-
-### Run 1 resultaten
+### Eerste trainingsresultaten
 
 ![Training run 1](outputs/plots/run1/training_run1.png)
 > Loss daalt snel in de eerste 3 epochs en vlakt daarna af rond 0.70. Accuracy blijft extreem laag — train ~1.4%, validatie ~0.7%. Het model leert vrijwel niets na epoch 3. De validatie loss ligt hoger dan de train loss wat wijst op overfitting.
@@ -92,109 +68,166 @@ Model wordt opgeslagen via `ModelCheckpoint` op basis van de laagste validatie l
 ![Predictions run 1](outputs/plots/run1/predictions_run1.png)
 > Bounding boxes zijn kleine rode vierkantjes die de stukken niet goed bedekken. Op de tweede image wordt vrijwel niets gedetecteerd. De boxes zijn te klein en zitten verkeerd gepositioneerd. Veel voorspellingen zijn `black-pawn` of `white-pawn` ongeacht wat er werkelijk staat.
 
-**Wat volgende run moet verbeteren**
-- Class imbalance aanpakken — model bias naar pawns moet weg
-- Box grootte en positie kloppen niet, de schaling in encoding of loss nakijken
-
 ---
 
 ## Dag 3 — 20/03/26
 
 ### Meer epochs
 
-Uit run 1 bleek dat het model na epoch 3 nauwelijks meer verbeterde binnen 30 epochs. De vraag is of het model überhaupt meer kan leren als het meer tijd krijgt, of dat het probleem dieper zit. Epochs verhoogd van 30 naar 200 om dit te testen. Verder niks veranderd zodat het effect puur aan de trainingstijd toe te schrijven is.
+**Wat:** epochs van 30 naar 200.
+**Waarom:** testen of meer trainingstijd het probleem oplost of dat het dieper zit.
 
 ![Training](outputs/plots/run2/training_run2.png)
-> Loss schommelt de hele tijd rond 1.25 zonder structureel te dalen — het model leert niks meer. De trainloss wiggelt sterk per epoch wat wijst op een te hoge learning rate. Validatie accuracy staat bevroren op ~3%, train accuracy ~6%. Meer epochs helpt hier niet.
+> Loss schommelt de hele tijd rond 1.25 zonder structureel te dalen. De trainloss wiggelt sterk per epoch wat wijst op een te hoge learning rate. Validatie accuracy staat bevroren op ~3%, train accuracy ~6%. Meer epochs helpt hier niet.
 
 ![Confusion matrix](outputs/plots/run2/confusion_matrix_run2.png)
-> Nog steeds heavy bias naar `black-pawn` en `white-pawn`. Vergeleken met de vorige keer is de spreiding iets gelijkmatiger over andere classes maar de diagonaal is zwak — het model discrimineert slecht tussen classes.
+> Nog steeds heavy bias naar `black-pawn` en `white-pawn`. Vergeleken met de vorige keer is de spreiding iets gelijkmatiger maar de diagonaal is zwak — het model discrimineert slecht tussen classes.
 
 ![MAE](outputs/plots/run2/mae_run2.png)
-> MAE is verslechterd ten opzichte van de vorige keer. x en y zitten nu op ~0.30 (was ~0.18 en ~0.15), w en h ook hoger. Het model plaatst boxes dus slechter dan voorheen ondanks meer training.
+> MAE verslechterd ten opzichte van de vorige keer. x en y zitten nu op ~0.30 (was ~0.18 en ~0.15), w en h ook hoger. Het model plaatst boxes slechter dan voorheen ondanks meer training.
 
 ![Predictions](outputs/plots/run2/predictions_run2.png)
-> Boxes zijn zichtbaar groter dan vorige keer en dekken soms een stuk. Maar de posities kloppen niet — er zijn grote rechthoeken die meerdere stukken bedekken in plaats van één per stuk. Veel voorspellingen zijn nog steeds pawn ongeacht wat er staat.
+> Boxes zijn groter dan vorige keer en dekken soms een stuk. Maar de posities kloppen niet — er zijn grote rechthoeken die meerdere stukken bedekken. Veel voorspellingen zijn nog steeds pawn.
 
-**Conclusie**  
-Meer epochs heeft het probleem niet opgelost en op sommige punten verslechterd. De learning rate is waarschijnlijk te hoog waardoor het model niet convergeert.
+**Conclusie:** meer epochs lost het probleem niet op. De learning rate is waarschijnlijk te hoog waardoor het model niet convergeert.
 
-### Aanpassingen
+---
 
-Learning rate verlaagd van `1e-3` naar `1e-4` zodat de stappen kleiner worden en de loss stabieler kan dalen. `ReduceLROnPlateau` toegevoegd — als de validatie loss 10 epochs achter elkaar niet verbetert wordt de LR automatisch gehalveerd met een minimum van `1e-6`.
+### Learning rate + model aanpassingen
 
-Model ook iets uitgebreid: een vierde conv blok toegevoegd (256 filters) en `Flatten` vervangen door `GlobalAveragePooling2D`. `Flatten` gaf een vector van 100k+ waarden door aan de Dense laag — GAP doet dat in 256 waarden. Minder parameters, traint stabieler.
+**Wat:** learning rate van `1e-3` naar `1e-4`. `ReduceLROnPlateau` toegevoegd — halveert LR als validatie loss 10 epochs niet verbetert, minimum `1e-6`. Vierde conv blok (256 filters). `Flatten` vervangen door `GlobalAveragePooling2D`.
+**Waarom:** te hoge LR veroorzaakte de schommelingen. Flatten gaf 100k+ waarden door aan de Dense laag — GAP doet dat in 256 waarden, minder parameters en stabieler.
 
 ![Training](outputs/plots/run3/training_run3.png)
-> Loss daalt nu wel structureel — van 1.2 naar ~0.73 voor train en ~0.76 voor validatie. De schommelingen zijn weg. Wel vlakt alles af rond epoch 50 en verbetert daarna nauwelijks meer. Validatie accuracy zakt naar bijna 0 terwijl train ~0.8% haalt — het model generaliseert slecht.
+> Loss daalt nu structureel — van 1.2 naar ~0.73 voor train en ~0.76 voor validatie. De schommelingen zijn weg. Wel vlakt alles af rond epoch 50 en verbetert daarna nauwelijks meer. Validatie accuracy zakt naar bijna 0 terwijl train ~0.8% haalt — het model generaliseert slecht.
 
 ![Confusion matrix](outputs/plots/run3/confusion_matrix_run3.png)
-> Bias naar pawns is er nog steeds, `white-pawn` scoort nu 82 correct maar trekt ook veel andere classes naar zich toe. Enkele classes doen het redelijker dan voorheen — `white-king` (9), `black-rook` (13), `black-knight` (10) hebben een zichtbare diagonaalwaarde. Maar het patroon is te verspreid voor betrouwbare detectie.
+> Bias naar pawns is er nog steeds maar enkele classes doen het redelijker — `white-king` (9), `black-rook` (13), `black-knight` (10) hebben een zichtbare diagonaalwaarde. Het patroon is te verspreid voor betrouwbare detectie.
 
 ![MAE](outputs/plots/run3/mae_run3.png)
-> Duidelijke verbetering — x ~0.118 (was ~0.185), y ~0.092 (was ~0.155), w en h zitten nu op ~0.029 en ~0.030 (was ~0.07-0.08). De boxgroottes worden erg goed geschat, de positionering is beter maar nog niet goed genoeg.
+> Duidelijke verbetering — x ~0.118 (was ~0.185), y ~0.092 (was ~0.155), w en h zitten nu op ~0.029 en ~0.030. De boxgroottes worden goed geschat, de positionering is beter maar nog niet goed genoeg.
 
 ![Predictions](outputs/plots/run3/predictions_run3.png)
-> Boxes zijn nu individueel per stuk in plaats van grote blokken. Op de eerste image worden meerdere stukken correct omcirkeld op de juiste plek. De tweede image detecteert niks — waarschijnlijk een te andere beeldstijl of lege bovenkant. Classes als `white-king`, `white-bishop` en `black-queen` worden nu af en toe correct voorspeld.
+> Boxes zijn nu individueel per stuk. Op de eerste image worden meerdere stukken correct omcirkeld. De tweede image detecteert niks. Classes als `white-king`, `white-bishop` en `black-queen` worden nu af en toe correct voorspeld.
 
-**Conclusie**  
-Duidelijke stap vooruit — loss convergeert stabiel, MAE op w/h is bijna opgelost, boxes zitten beter. Het grootste resterende probleem is de pawn-bias en het feit dat de validatie accuracy naar nul zakt wat op overfitting wijst. Volgende stap: class imbalance aanpakken.
+**Conclusie:** loss convergeert stabiel, MAE op w/h verbeterd, boxes zitten beter. Overfitting en pawn-bias blijven het probleem.
+
+---
 
 ### mAP toegevoegd
 
-mAP (mean Average Precision) is de standaard evaluatiemetric voor object detectie. Het combineert twee dingen tegelijk: hoe goed het model een object lokaliseert (via IoU — overlap tussen voorspelde en echte box) én hoe goed het de class correct voorspelt. Een hoge AP voor een class betekent dat het model die stukken op de juiste plek vindt met het juiste label. Dit geeft een eerlijker beeld dan alleen accuracy, omdat accuracy niet kijkt naar de kwaliteit van de bounding box.
-
-Berekend per class bij IoU drempelwaarde van 0.5, de rode stippellijn in de grafiek is de mAP over alle classes.
+**Wat:** mAP als evaluatiemetric toegevoegd.
+**Waarom:** accuracy meet alleen of het label klopt maar niet de kwaliteit van de box. mAP combineert lokalisatie (IoU — overlap tussen voorspelde en echte box) en classificatie tegelijk. Een hoge AP per class betekent dat het model die stukken op de juiste plek vindt met het juiste label. Berekend per class bij IoU 0.5, rode stippellijn is de mAP over alle classes.
 
 ![mAP](outputs/plots/run3/map_run3.png)
-> mAP van 0.017 — erg laag maar het geeft wel een duidelijk beeld per class. `white-bishop` scoort het hoogst (0.068), gevolgd door `black-bishop` (0.040) en `black-knight` (0.026). Opvallend is dat `white-pawn` en `black-pawn` juist laag scoren ondanks dat het model ze het meest voorspelt — het model gokt pawn maar de box zit te vaak op de verkeerde plek waardoor de IoU onder 0.5 blijft. Classes als `black-king`, `black-queen` en `white-king` scoren nul, die worden nooit correct gelokaliseerd én geclassificeerd tegelijk.
+> mAP van 0.017 — laag maar geeft per-class inzicht. `white-bishop` scoort het hoogst (0.068). Pawns scoren laag ondanks veel voorspellingen — het model gokt pawn maar de box zit te vaak op de verkeerde plek waardoor de IoU onder 0.5 blijft. Classes als `black-king` en `white-king` scoren nul.
 
-### Verbeteringen voor volgende test
+---
 
-**Class weights**  
-Het model gooide bijna alles als pawn omdat pawns veel vaker voorkomen in de dataset. Met class weights krijgt elke class een gewicht omgekeerd evenredig aan hoe vaak die voorkomt — zeldzame classes zoals kings en queens wegen zwaarder in de loss. Berekend als `total / (n_classes × count)`.
+### Class weights + BatchNormalization
 
-**BatchNormalization**  
-Na elk Conv2D blok toegevoegd. Normaliseert de activaties per batch waardoor de gradienten stabieler blijven en het model consistenter traint.
+**Wat:** class weights toegevoegd aan de loss (`total / (n_classes × count)`). BatchNormalization na elk Conv2D blok.
+**Waarom:** pawns domineerden omdat ze vaker voorkomen in de dataset. Class weights geven zeldzame classes meer gewicht in de loss. BatchNorm normaliseert activaties per batch waardoor gradiënten stabieler blijven en het model consistenter traint.
 
 ![Training](outputs/plots/run4/training_run4.png)
-> Grote verbetering — loss daalt stabiel van 1.2 naar ~0.54 voor train en ~0.56 voor validatie. De twee lijnen lopen dicht bij elkaar wat betekent dat het model nu generaliseert in plaats van te overfitten. Accuracy stijgt gestaag naar ~23% voor beide splits — een enorme sprong ten opzichte van de <1% van eerder.
+> Loss daalt stabiel van 1.2 naar ~0.54 voor train en ~0.56 voor validatie. De twee lijnen lopen dicht bij elkaar. Accuracy stijgt naar ~23% voor beide splits.
 
 ![Confusion matrix](outputs/plots/run4/confusion_matrix_run4.png)
-> De diagonaal is nu duidelijk zichtbaar voor bijna alle classes. `white-pawn` (60), `black-pawn` (54), `black-rook` (29), `white-queen` (34) en `black-bishop` (25) worden goed herkend. De pawn-bias is flink afgezwakt. Zeldzame classes als `black-king` (13) en `white-bishop` (13) worden nu ook gedetecteerd.
+> De diagonaal is duidelijk zichtbaar voor bijna alle classes. `white-pawn` (60), `black-pawn` (54), `black-rook` (29), `white-queen` (34) en `black-bishop` (25) worden goed herkend. Pawn-bias flink afgezwakt.
 
 ![MAE](outputs/plots/run4/mae_run4.png)
-> x ~0.122, y ~0.109 — vergelijkbaar met de vorige keer. w en h licht verslechterd (~0.049 en ~0.053 vs ~0.029 en ~0.030). De positiefout is vrijwel gelijk maar de class weights hebben de boxgroottes iets beïnvloed.
+> x ~0.122, y ~0.109 — vergelijkbaar met vorige keer. w en h licht verslechterd (~0.049 en ~0.053 vs ~0.029 en ~0.030).
 
 ![mAP](outputs/plots/run4/map_run4.png)
-> mAP gedaald naar 0.011 (was 0.017). `black-king` scoort nu het hoogst (0.041), `white-rook` (0.026). Opvallend: betere classificatie maar lagere mAP — het model voorspelt meer classes correct maar de box locaties kloppen nog niet goed genoeg voor IoU 0.5.
+> mAP gedaald naar 0.011. Betere classificatie maar box locaties kloppen nog niet goed genoeg voor IoU 0.5.
 
 ![Predictions](outputs/plots/run4/predictions_run4.png)
-> Duidelijk beter — veel meer classes worden correct benoemd, niet meer alleen pawns. Boxes zijn nog klein en zitten niet altijd precies op het stuk maar de labels kloppen veel vaker. Tweede image detecteert nu ook enkele stukken.
+> Meer classes correct benoemd, niet meer alleen pawns. Boxes nog klein maar labels kloppen vaker. Tweede image detecteert nu ook enkele stukken.
 
-**Conclusie**  
-Class weights en BatchNorm hebben het meeste effect gehad — accuracy van <1% naar ~23% en de diagonaal in de confusion matrix is eindelijk zichtbaar. De mAP is laag doordat de boxes te klein zijn en de IoU drempel van 0.5 niet gehaald wordt.
+**Conclusie:** class weights en BatchNorm hadden het meeste effect — accuracy van <1% naar ~23% en de diagonaal is eindelijk zichtbaar. mAP laag doordat boxes te klein zijn voor IoU 0.5.
+
+---
 
 ### GAP vervangen door spatiale Conv2D output
 
-GlobalAveragePooling middelde elke feature map naar één getal — het model verloor daarmee alle informatie over waar op het bord een stuk stond. Classificatie verbeterde maar boxposities niet, want positie-informatie was al weggegooid voor de output.
-
-Oplossing: GAP en de Dense lagen eruit. In plaats daarvan een vijfde MaxPool die de feature map van 14×14 naar 7×7 brengt — exact de grid grootte. Daarna een 1×1 Conv2D die per cel direct de box coördinaten en class scores uitgeeft. Elke cel in de output correspondeert nu rechtstreeks met een regio in de input image.
+**Wat:** GAP en Dense lagen verwijderd. Vijfde MaxPool (14×14 → 7×7). 1×1 Conv2D als output laag.
+**Waarom:** GAP gooit alle spatiale informatie weg door elke feature map te middelen naar één getal. Het model kon hierdoor nog classificeren maar niet meer lokaliseren. Met een spatiale output correspondeert elke outputcel direct met een regio van het bordimage.
 
 ![Training](outputs/plots/run5/training_run5.png)
-> Grote verbetering — loss daalt naar ~0.02 voor train en ~0.08 voor validatie. Accuracy stijgt naar ~35% train en ~39% validatie. De validatie accuracy ligt hoger dan train wat ongewoon is maar positief — het model generaliseert goed.
+> Loss naar ~0.02 voor train en ~0.08 voor validatie. Accuracy ~35% train en ~39% validatie.
 
 ![Confusion matrix](outputs/plots/run5/confusion_matrix_run5.png)
-> De diagonaal is nu zeer sterk — bijna alle classes worden correct geclassificeerd. `black-pawn` (123), `white-pawn` (114), `black-rook` (42), `white-queen` (44) en `white-rook` (40) scoren hoog. Verwarring tussen classes is minimaal geworden.
+> Diagonaal zeer sterk — bijna alle classes worden correct geclassificeerd. `black-pawn` (123), `white-pawn` (114), `black-rook` (42), `white-queen` (44).
 
 ![MAE](outputs/plots/run5/mae_run5.png)
-> x ~0.093, y ~0.078, w ~0.062, h ~0.070. Alle coördinaten vergelijkbaar — geen grote uitschieters meer. Maar de boxes zijn visueel nog steeds te klein en zitten niet goed om de stukken heen ondanks de lagere MAE.
+> Alle coördinaten ~0.062-0.093. Boxes visueel nog steeds te klein en niet goed gepositioneerd ondanks de lagere MAE.
 
 ![mAP](outputs/plots/run5/map_run5.png)
-> mAP = 0.000 — vrijwel nul. Dit komt doordat de boxes te klein zijn waardoor de IoU nooit boven 0.5 komt. De classificatie is sterk verbeterd maar de box coördinaten die het model voorspelt corresponderen niet met de werkelijke afmetingen van een stuk. De `encode_targets` functie slaat de box positie op als cel-relatieve coördinaten maar de output van het model wordt geïnterpreteerd als absolute image coördinaten — dit is een mismatch in de predict code.
+> mAP 0.000. Coördinaten werden cel-relatief opgeslagen maar als absolute waarden gedecodeerd in predict.py — mismatch die de boxes altijd linksboven plaatst.
 
 ![Predictions](outputs/plots/run5/predictions_run5.png)
-> Labels kloppen bijna allemaal — elke stuk krijgt de juiste naam met confidence ~1.00. De boxes zitten echter telkens linksboven van het stuk in plaats van eromheen. Op de tweede image worden de queens correct benoemd maar de rest mist.
+> Labels kloppen bijna allemaal met confidence ~1.00. Boxes zitten echter telkens linksboven van het stuk in plaats van eromheen.
 
-**Conclusie**  
-Classificatie is nu goed. Het probleem zit in hoe de voorspelde coördinaten worden omgezet naar pixels in `predict.py` — de cel-relatieve encoding wordt niet correct teruggerekend naar absolute beeldcoördinaten.
+**Conclusie:** classificatie opgelost. Probleem zit in coördinaten encoding/decoding mismatch.
+
+---
+
+### Coördinaten encoding herzien + w/h cel-relatief
+
+**Wat:** cx/cy als cel-relatieve offset (0-1 binnen de cel). w/h als `w × GRID_S`. w/h loss ×5. IoU drempel mAP van 0.5 naar 0.3.
+**Waarom:**
+- Cel-relatieve cx/cy: model leert de exacte positie binnen een cel in plaats van één gemiddelde per cel. Decode: `(col + cx_pred) / GRID_S × image_size`.
+- Cel-relatieve w/h: een stuk heeft w/h ~0.12 als image breuk. Sigmoid output van 0.12 vereist pre-activatie ~-2 — moeilijk te leren. Met `w × GRID_S` worden targets ~0.9.
+- w/h ×5: MSE gradiënt op kleine waarden is klein. Hogere weging dwingt correcte box afmetingen.
+- IoU 0.3: een box die 35% overlapt maar wel op de juiste plek zit telde bij IoU 0.5 niet mee als correct.
+
+![Training](outputs/plots/run6/training_run6.png)
+> Loss daalt stabiel naar ~0.04 train en ~0.10 validatie. Accuracy ~35% train en ~38% validatie, consistent met vorige runs.
+
+![Confusion matrix](outputs/plots/run6/confusion_matrix_run6.png)
+> Diagonaal sterk voor alle classes. Classificatie blijft goed en is niet aangetast door de encoding wijzigingen.
+
+![MAE](outputs/plots/run6/mae_run6.png)
+> x ~0.072, y ~0.068, w ~0.042, h ~0.047. w en h lager dan vorige runs door de cel-relatieve encoding.
+
+![mAP](outputs/plots/run6/map_run6.png)
+> mAP 0.766 bij IoU 0.3 — sprong van 0.131 naar 0.766. Bijna alle classes scoren hoog. `white-rook` (1.0), `white-queen` (0.91), `white-king` (0.91) en `black-knight` (0.79).
+
+![Predictions](outputs/plots/run6/predictions_run6.png)
+> Op de eerste image worden de meeste stukken gedetecteerd met de juiste labels. Boxes zitten dichter om de stukken heen dan voorheen. Op de tweede image worden niet alle stukken gedetecteerd — de queens worden wel gevonden maar de boxes zitten niet gecentreerd om de stukken heen, ze zijn verschoven. Dit geldt ook voor een aantal andere stukken op beide images. De lokalisatie is verbeterd maar nog niet consistent genoeg.
+
+**Conclusie:** cel-relatieve encoding heeft het lokalisatieprobleem grotendeels opgelost. mAP van 0 naar 0.766. Resterende problemen zijn dat niet alle stukken worden gedetecteerd en dat bounding boxes niet altijd gecentreerd zijn om het stuk heen. De x/y fout (~0.07) zorgt voor een verschuiving van soms een halve celgrootte.
+
+---
+
+## Dag 4 — 20/03/26
+
+### Observaties checkpoint run 6 / 11
+
+Voordat verder gegaan wordt met experimenteren, eerst een overzicht van wat er nog niet goed gaat op basis van de laatste resultaten.
+
+**Niet alle stukken worden gedetecteerd** — op de tweede prediction image worden de meeste stukken helemaal niet opgepikt. Het model detecteert wel de queens bovenaan maar mist de rest. Dit duidt op een te hoge confidence drempel of een te zwak confidence signaal voor bepaalde stukken.
+
+**Bounding box centrering klopt niet volledig** — de boxes zitten weliswaar op de juiste cel maar zijn niet precies gecentreerd om het stuk heen. Op de tweede image staan de queen boxes duidelijk verschoven ten opzichte van het daadwerkelijke stuk. De fout in x/y (~0.07 cel-relatief) vertaalt zich visueel naar een duidelijke offset.
+
+### Grid grootte verhoogd + confidence weging
+
+**Wat:** `GRID_S` van 7 naar 14. Laatste MaxPool verwijderd zodat de feature map 14×14 blijft. Obj/noobj gewogen confidence loss toegevoegd — cellen met een stuk ×10, lege cellen ×0.5.
+**Waarom:** bij een 7×7 grid deelden meerdere stukken regelmatig dezelfde cel. In `encode_targets` wint de laatste — de andere verdwijnt uit de targets en het model leert hem nooit. Met 14×14 = 196 cellen voor maximaal 32 stukken heeft elk stuk ruimschoots zijn eigen cel. De confidence weging dwingt het model hogere confidence te leren voor cellen met een stuk.
+
+![Training](outputs/plots/run7/training_run7.png)
+> Accuracy ~7-8% is laag en moet veder kijken waarom dit gebeurd
+
+![Confusion matrix](outputs/plots/run7/confusion_matrix_run7.png)
+> Diagonaal zeer sterk voor alle classes. Bijna geen verwarring meer tussen classes. Merkbaar beter dan run 6.
+
+![MAE](outputs/plots/run7/mae_run7.png)
+> x ~0.10, y ~0.10 — goed. w ~0.19 en h ~0.39 zijn hoger dan verwacht. De w/h encoding werkt minder goed bij de grotere grid omdat de cel-relatieve schaal veranderd is.
+
+![mAP](outputs/plots/run7/map_run7.png)
+> mAP = 0.904 bij IoU 0.3 — grootste sprong tot nu toe van 0.766 naar 0.904. Bijna alle classes boven 0.88. `black-knight`, `white-king` en `white-knight` scoren 1.0. `white-bishop` (0.80) en `black-bishop` (0.73) zijn de laagste maar nog altijd acceptabel.
+
+![Predictions](outputs/plots/run7/predictions_run7.png)
+> Eerste image detecteert bijna alles correct met boxes die redelijk om de stukken heen zitten. Tweede image detecteert alle queens correct. De h MAE van 0.39 is zichtbaar — boxes zijn soms te hoog of te laag.
+
+**Conclusie:** grid vergroting heeft het conflictprobleem opgelost. mAP van 0.766 naar 0.904. Resterende probleem is de h-fout die boxes verticaal te groot of klein maakt.

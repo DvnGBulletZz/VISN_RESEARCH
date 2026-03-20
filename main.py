@@ -7,6 +7,7 @@ from model import build_model
 from train import train
 from evaluate import plot_confusion_matrix, plot_mae, plot_map
 from predict import plot_predictions
+
 import tensorflow as tf
 
 
@@ -20,7 +21,7 @@ def setup_gpu(mem_mb=19_456):
     mixed_precision.set_global_policy('mixed_float16')
     print('Mixed precision: mixed_float16')
 
-setup_gpu()  # must run before any other TF/Keras imports
+setup_gpu()
 
 def main():
     df_train = load_all_annotations(split="train")
@@ -46,6 +47,7 @@ def main():
     plot_mae(model, X_test, test_ann)
     plot_map(model, X_test, test_ann)
     plot_predictions(model, X_test, n=2)
+ 
  
  
 if __name__ == "__main__":

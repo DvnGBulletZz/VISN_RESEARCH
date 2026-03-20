@@ -51,11 +51,10 @@ def build_model() -> Model:
     x = _res(x, 256)
     x = layers.MaxPooling2D((2, 2))(x)
 
-    # Block 5 — 14x14 -> 7x7 (= GRID_S)
-    # This pool brings the spatial size to exactly the grid size so each
-    # feature map cell aligns with one grid cell in the output
+    # Block 5 — stays at 14x14, no MaxPool
+    # Removing the last pool doubles the spatial resolution from 7×7 to 14×14,
+    # giving each piece more room to have its own cell with fewer conflicts.
     x = _cbl(x, 512)
-    x = layers.MaxPooling2D((2, 2))(x)
 
     # Detection head — stays spatial, no flattening
     x = _cbl(x, 256, kernel=1)  # 1x1 conv to mix channels
