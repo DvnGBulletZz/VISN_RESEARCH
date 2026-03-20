@@ -92,7 +92,7 @@ def _ap(precisions, recalls):
     return ap / 11
 
 
-def plot_map(model, X_test, test_ann, iou_threshold=0.5):
+def plot_map(model, X_test, test_ann, iou_threshold=0.3):
     """Saves per-class AP bar chart."""
     y_true = encode_targets(test_ann)
     y_pred = model.predict(X_test, verbose=0)
@@ -109,7 +109,15 @@ def plot_map(model, X_test, test_ann, iou_threshold=0.5):
                 class_n_gt[true_cls] += 1
                 conf     = float(y_pred[i, row, col, 4])
                 pred_cls = int(np.argmax(y_pred[i, row, col, 5:]))
-                iou      = _compute_iou(y_true[i, row, col, :4], y_pred[i, row, col, :4])
+                # decode cell-relative w/h back to image fractions for IoU
+                t = y_true[i, row, col, :4].copy()
+                p = y_pred[i, row, col, :4].copy()
+                # decode cell-relative cx/cy and cell-relative w/h
+                t[0] = (col + t[0]) / GRID_S; t[1] = (row + t[1]) / GRID_S
+                p[0] = (col + p[0]) / GRID_S; p[1] = (row + p[1]) / GRID_S
+                t[2] /= GRID_S; t[3] /= GRID_S
+                p[2] /= GRID_S; p[3] /= GRID_S
+                iou = _compute_iou(t, p)
                 tp = 1 if (iou >= iou_threshold and pred_cls == true_cls) else 0
                 class_results[true_cls].append((conf, tp))
 
@@ -133,7 +141,7 @@ def plot_map(model, X_test, test_ann, iou_threshold=0.5):
     fig, ax = plt.subplots(figsize=(12, 5))
     sns.barplot(data=df, x='class', y='AP', palette='muted', ax=ax)
     ax.axhline(mean_ap, color='red', linestyle='--', linewidth=1, label=f"mAP = {mean_ap:.3f}")
-    ax.set_title(f"AP per class @ IoU 0.5 — test set (run {RUN_ID})")
+    ax.set_title(f"AP per class @ IoU 0.3 — test set (run {RUN_ID})")
     ax.set_xlabel("Class"); ax.set_ylabel("Average Precision")
     ax.tick_params(axis='x', rotation=45); ax.legend()
     plt.tight_layout()

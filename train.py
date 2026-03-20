@@ -19,24 +19,34 @@ from preprocessing import label_encoder
 
 
 def encode_targets(annotations: list) -> np.ndarray:
-    """Converts annotation dicts into a (N, GRID_S, GRID_S, 5 + NUM_CLASSES) target array."""
+    """
+    Encodes annotations into (N, GRID_S, GRID_S, 5 + NUM_CLASSES) target array.
+    x, y are stored as absolute normalised image coordinates (0-1).
+    w, h are stored as normalised fractions of the image size.
+    The cell is determined by which grid cell the box center falls into.
+    Using absolute coords (not cell-relative) because with a spatial Conv2D
+    model the cell position is already implicit — simpler and more stable.
+    """
     targets = np.zeros((len(annotations), GRID_S, GRID_S, 5 + NUM_CLASSES), dtype=np.float32)
 
     for i, boxes in enumerate(annotations):
         for box in boxes:
-            cx  = ((box['xmin'] + box['xmax']) / 2) / IMG_WIDTH
-            cy  = ((box['ymin'] + box['ymax']) / 2) / IMG_HEIGHT
+            cx = ((box['xmin'] + box['xmax']) / 2) / IMG_WIDTH
+            cy = ((box['ymin'] + box['ymax']) / 2) / IMG_HEIGHT
+            w  = (box['xmax'] - box['xmin']) / IMG_WIDTH
+            h  = (box['ymax'] - box['ymin']) / IMG_HEIGHT
+
             col = min(int(cx * GRID_S), GRID_S - 1)
             row = min(int(cy * GRID_S), GRID_S - 1)
 
             one_hot = np.zeros(NUM_CLASSES, dtype=np.float32)
             one_hot[label_encoder.transform([box['class']])[0]] = 1.0
 
+            # cx/cy stored as cell-relative offsets (0-1 within the cell)
+            # w/h stored relative to cell size (w * GRID_S)
+            # This lets the model learn fine-grained position within each cell
             targets[i, row, col] = np.concatenate([
-                [cx * GRID_S - col, cy * GRID_S - row,
-                 (box['xmax'] - box['xmin']) / IMG_WIDTH,
-                 (box['ymax'] - box['ymin']) / IMG_HEIGHT,
-                 1.0],
+                [cx * GRID_S - col, cy * GRID_S - row, w * GRID_S, h * GRID_S, 1.0],
                 one_hot,
             ])
 
@@ -58,8 +68,18 @@ def make_detection_loss(class_weights: tf.Tensor):
     """Returns a detection loss function with class weights baked in."""
     def detection_loss(y_true, y_pred):
         obj        = y_true[..., 4:5]
-        coord_loss = tf.reduce_mean(obj * tf.square(y_true[..., :4] - y_pred[..., :4]))
+        xy_loss    = tf.reduce_mean(obj * tf.square(y_true[..., :2]  - y_pred[..., :2]))
+        wh_loss    = 5.0 * tf.reduce_mean(obj * tf.square(y_true[..., 2:4] - y_pred[..., 2:4]))
+        coord_loss = xy_loss + wh_loss
         conf_loss  = tf.reduce_mean(tf.square(y_true[..., 4:5] - y_pred[..., 4:5]))
+        cw         = tf.cast(class_weights, y_true.dtype)
+        w_per_cell = tf.reduce_sum(y_true[..., 5:] * cw, axis=-1, keepdims=True)
+        class_loss = tf.reduce_mean(
+            obj * w_per_cell * tf.keras.losses.categorical_crossentropy(
+                y_true[..., 5:], y_pred[..., 5:]
+            )[..., tf.newaxis]
+        )
+        return coord_loss + conf_loss + class_loss
         cw         = tf.cast(class_weights, y_true.dtype)
         w_per_cell = tf.reduce_sum(y_true[..., 5:] * cw, axis=-1, keepdims=True)
         class_loss = tf.reduce_mean(

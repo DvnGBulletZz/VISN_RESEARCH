@@ -61,7 +61,7 @@ def build_model() -> Model:
     x = _cbl(x, 256, kernel=1)  # 1x1 conv to mix channels
     x = layers.Dropout(0.3)(x)
 
-    # Final conv outputs (5 + NUM_CLASSES) values per cell directly
+    # Sigmoid on all outputs — keeps everything in (0,1)
     out = layers.Conv2D(5 + NUM_CLASSES, 1, activation='sigmoid',
                         padding='same', name='grid')(x)
 
