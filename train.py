@@ -91,14 +91,6 @@ def make_detection_loss(class_weights: tf.Tensor):
             )[..., tf.newaxis]
         )
         return coord_loss + conf_loss + class_loss
-        cw         = tf.cast(class_weights, y_true.dtype)
-        w_per_cell = tf.reduce_sum(y_true[..., 5:] * cw, axis=-1, keepdims=True)
-        class_loss = tf.reduce_mean(
-            obj * w_per_cell * tf.keras.losses.categorical_crossentropy(
-                y_true[..., 5:], y_pred[..., 5:]
-            )[..., tf.newaxis]
-        )
-        return coord_loss + conf_loss + class_loss
     return detection_loss
 
 
