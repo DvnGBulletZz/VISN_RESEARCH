@@ -317,3 +317,65 @@ Voordat verder gegaan wordt met experimenteren, eerst een overzicht van wat er n
 **Wat:** in `train.py` bevond zich in de functie `make_detection_loss()` een codeblok dat na een `return` statement stond. Python voert code na een `return` niet uit — het blok werd dus nooit bereikt. Het gehele dode blok is verwijderd.
 
 **Waarom:** dode code heeft geen effect op de uitvoer of het trainingsgedrag, maar brengt wel onderhoudsproblemen mee. Bij het lezen of debuggen van `make_detection_loss()` kan een lezer ten onrechte aannemen dat het blok wél onderdeel is van de lossberekening en er tijd mee verliezen. Naarmate de loss verder wordt getuned, wordt dode code ook een potentiële bron van verwarring — het is niet altijd direct duidelijk waarom iets er staat als het nooit uitvoert. Door de code te verwijderen is de functie kleiner, makkelijker te doorgronden en minder foutgevoelig bij toekomstige wijzigingen. Dit is geen functionele verbetering maar een codekwaliteitsverbetering.
+
+---
+
+### predict.py uitgebreid voor standalone gebruik
+
+**Wat:** `predict.py` is uitgebreid zodat het zowel vanuit `main.py` als direct als los script gebruikt kan worden. Er is een nieuwe functie `predict_single_image()` toegevoegd die een willekeurige afbeelding van schijf laadt, deze normaliseert en door het model stuurt. Via `argparse` kan het script direct worden aangeroepen met `--image`, `--model`, `--threshold` en `--output` als argumenten. Na het opslaan van het resultaat wordt het outputbestand automatisch geopend in de standaard afbeeldingviewer van het systeem. De bestaande `plot_predictions()` functie die vanuit `main.py` wordt aangeroepen is ongewijzigd gebleven.
+
+**Waarom:** tot nu toe was het niet mogelijk om het model te testen op een eigen afbeelding zonder eerst de volledige `main.py` pipeline te draaien, inclusief het laden van de dataset en het opnieuw trainen. Dat is tijdrovend en onnodig als het model al opgeslagen is. Door een standalone modus toe te voegen kan het model direct worden uitgetest op een willekeurige schaakbordfoto zonder afhankelijkheid van de dataset. Het automatisch openen van het resultaat na opslaan bespaart een handmatige stap — het resultaat is direct zichtbaar zonder dat de outputmap opgezocht hoeft te worden.
+
+met een image die ingeladen wordt met andere dimensions etc gaat er iets fout de onderstaande image is wat er gebruikt wordt voor een test
+![Predictions](test1.png)
+
+![Predictions](outputs\plots\run9\test1_predicted.png)
+
+duidelijk gaat er iets fout met  de kwaliteit van de image en ook de resultaten die niet goed zijn
+
+---
+
+### predict.py — output op originele afbeelding
+
+**Wat:** de standalone modus in `predict.py` tekent de bounding boxes nu op de originele afbeelding in plaats van op de verkleinde 224×224 versie. De afbeelding wordt gesplitst in twee stappen: `_load_original()` laadt het origineel op volledige resolutie, `_preprocess_for_model()` maakt een aparte 224×224 kopie puur voor de modelinvoer. De voorspelde boxcoördinaten, die in 224×224 ruimte terugkomen, worden via `_scale_boxes()` teruggeschaald naar de originele afbeeldingsdimensies. De figuurgrootte in de output past zich automatisch aan op basis van de originele breedte en hoogte.
+
+**Waarom:** het model verwacht altijd 224×224 als invoer, maar die resolutie is alleen bedoeld voor het model — het is niet de juiste schaal om resultaten op te presenteren. Bij een grote inputafbeelding stonden de boxes op de 224×224 thumbnail, waardoor de output niet overeenkwam met de afbeelding die als input was meegegeven. Bovendien gingen bij het terugschalen naar de outputweergave positiefouten verloren die visueel pas zichtbaar zijn op de originele resolutie. Door het origineel te bewaren en de boxcoördinaten terug te schalen via de verhouding `orig_dim / 224`, kloppen de boxes op de afbeelding die de gebruiker herkent als input.
+
+
+![Predictions](outputs\plots\run9\test2.png)
+
+
+de output is beter maar  de prediction zijn nog off. Mogelijk doordat het model getrained is op puur een foto van het bord. een mogelijke oplossing is met op cv het bord als kandidaat te detecteren
+---
+
+## Dag 6 — 23/03/26
+
+### board_detector.py — automatisch schaakbord detecteren in willekeurige afbeeldingen
+
+**Wat:** een nieuw los bestand `board_detector.py` is aangemaakt dat met OpenCV het schaakbord automatisch uit een willekeurige afbeelding knipt. De functie `crop_board()` converteert de afbeelding naar grijswaarden, past Gaussian blur en Canny edge detection toe en zoekt vervolgens de grootste vierhoekige contour — dat is in vrijwel alle gevallen het bord. Die contour wordt via een perspectief-transformatie rechtgetrokken tot een vierkante top-down weergave. Het bestand is zowel standalone bruikbaar (`python board_detector.py --image screenshot.png`) als importeerbaar vanuit andere bestanden. In `predict.py` is een `--detect` flag toegevoegd die `crop_board()` aanroept vóór de modelinferentie, zodat beide stappen in één commando gecombineerd kunnen worden:
+
+**Waarom:** het model is getraind op geïsoleerde schaakbordafbeeldingen zonder omgeving eromheen. Een screenshot van chess.com of een foto van een bord op tafel bevat altijd extra context — UI-elementen, achtergrond, een hand — die het model niet kent en ook niet nodig heeft. Als die context niet weggeknipt wordt, verspilt het model gridcellen aan regio's buiten het bord en worden er detecties op de verkeerde locaties gemeld. Door het bord eerst te isoleren via contourdetectie en perspectief-correctie krijgt het model exact dezelfde soort input als waarmee het getraind is. De keuze voor contourdetectie is bewust simpel gehouden: een schaakbord is de meest prominente rechthoekige structuur in vrijwel elke boardgame-screenshot, wat de aanpak robuust maakt zonder complexe modellen nodig te hebben.
+
+### Testresultaten board_detector op chess.com screenshot
+
+De volgende vier afbeeldingen zijn gegenereerd met `python predict.py --image test1.png --detect`.
+
+**Edges**
+![Edges](outputs/plots/boxdetect/test1_edges.png)
+> De Canny edge detectie vindt alle randen in de screenshot — schaakstukken, UI-knoppen, het bord zelf en de achtergrond. De boardrand is duidelijk zichtbaar als een prominente rechthoek in het midden-links van het beeld.
+
+**Contour**
+![Contour](outputs/plots/boxdetect/test1_contour.png)
+> De groene rechthoek toont het gedetecteerde bord. De contourdetectie heeft het bordgebied correct gevonden — de vier rode hoekpunten zitten op de juiste hoeken van het schaakbord. De UI van chess.com rondom het bord wordt genegeerd.
+
+**Geknipt bord**
+![Board](outputs/plots/boxdetect/test1_board.png)
+> Het uitgeknipte bord na perspectief-correctie. Het bord is schoon geïsoleerd zonder UI-elementen eromheen. De schaal en oriëntatie kloppen — dit is exact het soort input waarop het model getraind is.
+
+**Eindresultaat met detecties**
+![Predicted](outputs/plots/boxdetect/test1_predicted.png)
+> De meeste stukken worden correct gedetecteerd met confidence 1.00. Een aantal observaties over wat nog niet klopt:
+> - De meeste stukken worden wel gevonden maar de klasselabels kloppen niet altijd. Zo worden sommige zwarte pionnen gelabeld als `black-knight` en omgekeerd.
+> - In het midden van het bord staat een blauw uitroepteken van de chess.com UI dat na het uitknippen nog zichtbaar is op het bord. Dit valt in een cel die het model probeert te classificeren, wat tot een foutieve detectie kan leiden.
+> - Niet alle stukken worden gedetecteerd — een deel mist nog een bounding box.
+> - De borddetectie zelf werkt goed.
