@@ -2,13 +2,6 @@
 # Defines the CNN for grid-based multi-object detection.
 # Input : 224x224x3
 # Output: (GRID_S, GRID_S, 5 + NUM_CLASSES) — one prediction per grid cell
-#
-# Key change from previous version:
-# GlobalAveragePooling replaced by a 5th MaxPool + Conv2D output.
-# GAP destroyed all spatial information — the model could learn WHAT is on
-# the board but not WHERE. Now the feature map is kept spatial all the way
-# to the output, so each cell in the grid directly corresponds to a region
-# of the input image.
 
 from tensorflow.keras import layers, Model, Input
 from config import IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS, NUM_CLASSES, GRID_S
@@ -33,30 +26,29 @@ def build_model() -> Model:
     """Builds and returns the detection CNN."""
     inp = Input((IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), name='image')
 
-    # Block 1 — 224x224 -> 112x112
+    # Block 1 — 640x640 -> 320x320
     x = _cbl(inp, 32)
     x = layers.MaxPooling2D((2, 2))(x)
 
-    # Block 2 — 112x112 -> 56x56
+    # Block 2 — 320x320 -> 160x160
     x = _cbl(x, 64)
     x = layers.MaxPooling2D((2, 2))(x)
 
-    # Block 3 — 56x56 -> 28x28
+    # Block 3 — 160x160 -> 80x80
     x = _cbl(x, 128)
     x = _res(x, 128)
     x = layers.MaxPooling2D((2, 2))(x)
 
-    # Block 4 — 28x28 -> 14x14
+    # Block 4 — 80x80 -> 40x40
     x = _cbl(x, 256)
     x = _res(x, 256)
     x = layers.MaxPooling2D((2, 2))(x)
 
-    # Block 5 — stays at 14x14, no MaxPool
-    # Removing the last pool doubles the spatial resolution from 7×7 to 14×14,
-    # giving each piece more room to have its own cell with fewer conflicts.
+    # Block 5 — 40x40 -> 20x20 (matches GRID_S=20)
     x = _cbl(x, 512)
+    x = layers.MaxPooling2D((2, 2))(x)
 
-    # Detection head — stays spatial, no flattening
+    # Detection head — stays spatial at 20x20, no flattening
     x = _cbl(x, 256, kernel=1)  # 1x1 conv to mix channels
     x = layers.Dropout(0.3)(x)
 

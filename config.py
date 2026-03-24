@@ -5,7 +5,7 @@ import os
 
 # ─── Run identifier ───────────────────────────────────────────────────────────
 
-RUN_ID = 9
+RUN_ID = 10
 
 # ─── Base directories ─────────────────────────────────────────────────────────
 
@@ -45,13 +45,13 @@ MODELS_DIR  = _p("outputs", "models")
 
 # ─── Image settings ───────────────────────────────────────────────────────────
 
-IMG_HEIGHT   = 224
-IMG_WIDTH    = 224
+IMG_HEIGHT   = 640
+IMG_WIDTH    = 640
 IMG_CHANNELS = 3
 
 # ─── Detection grid ───────────────────────────────────────────────────────────
 
-GRID_S = 14
+GRID_S = 20
 
 # ─── Class mapping ────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ NUM_CLASSES  = len(CLASS_NAMES)
 
 # ─── Training hyperparameters ─────────────────────────────────────────────────
 
-BATCH_SIZE       = 16
+BATCH_SIZE       = 8
 EPOCHS           = 200
 LEARNING_RATE    = 1e-4
 RANDOM_SEED      = 42

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import cv2
 
-from config import CLASS_NAMES, GRID_S, IMG_HEIGHT, IMG_WIDTH, PLOTS_DIR, MODELS_DIR, RUN_ID
+from config import GRID_S, IMG_HEIGHT, IMG_WIDTH, PLOTS_DIR, MODELS_DIR, RUN_ID
 from preprocessing import label_encoder
 
 
@@ -73,7 +73,7 @@ def plot_predictions(model, images: list, n: int = 2):
     """Called from main.py. Saves a figure with n example images and predicted bounding boxes."""
     os.makedirs(PLOTS_DIR, exist_ok=True)
     n = min(n, len(images))
-    fig, axes = plt.subplots(1, n, figsize=(6 * n, 6))
+    _, axes = plt.subplots(1, n, figsize=(6 * n, 6))
     if n == 1:
         axes = [axes]
 
@@ -133,7 +133,7 @@ def predict_single_image(image_path: str, model_path: str = None,
     import tensorflow as tf
 
     if model_path is None:
-        model_path = os.path.join(MODELS_DIR, f"best_model_run8.h5")
+        model_path = os.path.join(MODELS_DIR, f"best_model_run{RUN_ID}.h5")
 
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model not found: {model_path}")

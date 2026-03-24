@@ -21,11 +21,9 @@ from preprocessing import label_encoder
 def encode_targets(annotations: list) -> np.ndarray:
     """
     Encodes annotations into (N, GRID_S, GRID_S, 5 + NUM_CLASSES) target array.
-    x, y are stored as absolute normalised image coordinates (0-1).
-    w, h are stored as normalised fractions of the image size.
-    The cell is determined by which grid cell the box center falls into.
-    Using absolute coords (not cell-relative) because with a spatial Conv2D
-    model the cell position is already implicit — simpler and more stable.
+    cx/cy are stored as cell-relative offsets [0, 1] within the assigned cell.
+    w/h are scaled by 7 (fixed, regardless of GRID_S) to keep sigmoid targets ~0.9.
+    The cell is determined by where the box center falls in the grid.
     """
     targets = np.zeros((len(annotations), GRID_S, GRID_S, 5 + NUM_CLASSES), dtype=np.float32)
 
@@ -42,10 +40,7 @@ def encode_targets(annotations: list) -> np.ndarray:
             one_hot = np.zeros(NUM_CLASSES, dtype=np.float32)
             one_hot[label_encoder.transform([box['class']])[0]] = 1.0
 
-            # w/h scaled by 7 (original grid size) regardless of GRID_S.
-            # With GRID_S=14, w*14 gives targets >1.0 which sigmoid clips —
-            # the model can never predict the correct box size. Using 7 keeps
-            # targets around 0.9 which sigmoid handles correctly.
+            # Fixed scale of 7 keeps w/h targets ~0.9 — safe for sigmoid regardless of GRID_S.
             targets[i, row, col] = np.concatenate([
                 [cx * GRID_S - col, cy * GRID_S - row,
                  w * 7, h * 7, 1.0],
@@ -71,17 +66,13 @@ def make_detection_loss(class_weights: tf.Tensor):
     def detection_loss(y_true, y_pred):
         obj        = y_true[..., 4:5]
         xy_loss    = tf.reduce_mean(obj * tf.square(y_true[..., :2]  - y_pred[..., :2]))
-        wh_loss    = 1.0 * tf.reduce_mean(obj * tf.square(y_true[..., 2:4] - y_pred[..., 2:4]))
+        wh_loss    = tf.reduce_mean(obj * tf.square(y_true[..., 2:4] - y_pred[..., 2:4]))
         coord_loss = xy_loss + wh_loss
-        # Confidence loss with obj/noobj weighting — classic YOLO approach.
-        # Cells with a piece get weight 5, empty cells get 0.5.
-        # Without this the model learns low confidence everywhere because
-        # most cells are empty and that minimises average MSE.
-        conf_true = y_true[..., 4:5]
-        conf_pred = y_pred[..., 4:5]
+        # Occupied cells weighted ×10, empty ×0.5 — prevents the model from
+        # predicting low confidence everywhere just to minimise average MSE.
         conf_loss = tf.reduce_mean(
-            10.0 * obj * tf.square(conf_true - conf_pred) +
-            0.5 * (1.0 - obj) * tf.square(conf_true - conf_pred)
+            10.0 * obj       * tf.square(obj - y_pred[..., 4:5]) +
+             0.5 * (1 - obj) * tf.square(obj - y_pred[..., 4:5])
         )
         cw         = tf.cast(class_weights, y_true.dtype)
         w_per_cell = tf.reduce_sum(y_true[..., 5:] * cw, axis=-1, keepdims=True)
