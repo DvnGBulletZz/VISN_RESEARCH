@@ -453,3 +453,5 @@ De volgende vier afbeeldingen zijn gegenereerd met `python predict.py --image te
 **Resultaat:** de augmentatie heeft het probleem niet opgelost. `black-bishop` wordt nog steeds consequent als `black-pawn` geclassificeerd. Dit wijst erop dat het probleem dieper zit dan variatie in belichting of spiegeling - de visuele stijl van de chess.com bishop lijkt voor het trainen en classificeren bij sommige images niet correct wil doen
 
 ![test1 predicted run 12](outputs/plots/run12/test1_predicted.png)
+
+---

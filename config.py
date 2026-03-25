@@ -5,8 +5,7 @@ import os
 
 # ─── Run identifier ───────────────────────────────────────────────────────────
 
-RUN_ID = 12
-
+RUN_ID = 14
 # ─── Base directories ─────────────────────────────────────────────────────────
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -74,7 +73,7 @@ NUM_CLASSES  = len(CLASS_NAMES)
 # ─── Training hyperparameters ─────────────────────────────────────────────────
 
 BATCH_SIZE       = 8
-EPOCHS           = 200
+EPOCHS           = 150
 LEARNING_RATE    = 1e-4
 RANDOM_SEED      = 42
 

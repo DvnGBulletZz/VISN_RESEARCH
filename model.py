@@ -1,6 +1,6 @@
 # model.py
 # Defines the CNN for grid-based multi-object detection.
-# Input : 224x224x3
+# Input : 640x640x3
 # Output: (GRID_S, GRID_S, 5 + NUM_CLASSES) — one prediction per grid cell
 
 from tensorflow.keras import layers, Model, Input
@@ -49,10 +49,9 @@ def build_model() -> Model:
     x = layers.MaxPooling2D((2, 2))(x)
 
     # Detection head — stays spatial at 20x20, no flattening
-    x = _cbl(x, 256, kernel=1)  # 1x1 conv to mix channels
+    x = _cbl(x, 256, kernel=1)
     x = layers.Dropout(0.3)(x)
 
-    # Sigmoid on all outputs — keeps everything in (0,1)
     out = layers.Conv2D(5 + NUM_CLASSES, 1, activation='sigmoid',
                         padding='same', name='grid')(x)
 
