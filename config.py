@@ -5,7 +5,7 @@ import os
 
 # ─── Run identifier ───────────────────────────────────────────────────────────
 
-RUN_ID = 10
+RUN_ID = 12
 
 # ─── Base directories ─────────────────────────────────────────────────────────
 
@@ -77,3 +77,9 @@ BATCH_SIZE       = 8
 EPOCHS           = 200
 LEARNING_RATE    = 1e-4
 RANDOM_SEED      = 42
+
+# Extra multipliers on top of the auto-computed inverse-frequency weights.
+# Use this to manually boost classes that are still being confused.
+CLASS_WEIGHT_OVERRIDES = {
+    'black-bishop': 3.0,
+}

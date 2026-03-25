@@ -14,6 +14,7 @@ from config import (
     BATCH_SIZE, EPOCHS, LEARNING_RATE,
     GRID_S, NUM_CLASSES, IMG_HEIGHT, IMG_WIDTH,
     PLOTS_DIR, MODELS_DIR, RUN_ID, RANDOM_SEED,
+    CLASS_WEIGHT_OVERRIDES,
 )
 from preprocessing import label_encoder
 
@@ -58,6 +59,9 @@ def _compute_class_weights(annotations: list) -> tf.Tensor:
             counts[label_encoder.transform([box['class']])[0]] += 1
     total   = counts.sum()
     weights = total / (NUM_CLASSES * np.where(counts == 0, 1, counts))
+    for class_name, multiplier in CLASS_WEIGHT_OVERRIDES.items():
+        idx = label_encoder.transform([class_name])[0]
+        weights[idx] *= multiplier
     return tf.constant(weights, dtype=tf.float32)
 
 

@@ -2,7 +2,7 @@
 # Prepares images and annotations before they go into the model.
 
 import numpy as np
-from config import CLASS_NAMES, NUM_CLASSES
+from config import CLASS_NAMES, NUM_CLASSES, IMG_WIDTH
 from sklearn.preprocessing import LabelEncoder
 
 
@@ -25,3 +25,29 @@ def preprocess(images: list, annotations: list) -> tuple[np.ndarray, list]:
     """Normalises images and returns annotations unchanged for now."""
     X = normalise_images(images)
     return X, annotations
+
+
+def augment(images: np.ndarray, annotations: list) -> tuple[np.ndarray, list]:
+    """
+    Doubles the training set with horizontal flips + brightness jitter.
+    Only call on training data, not on val/test.
+    """
+    aug_images, aug_annotations = list(images), list(annotations)
+
+    for img, boxes in zip(images, annotations):
+        # Horizontal flip
+        flipped = img[:, ::-1, :]
+        flipped_boxes = [
+            {**b, 'xmin': IMG_WIDTH - b['xmax'], 'xmax': IMG_WIDTH - b['xmin']}
+            for b in boxes
+        ]
+        aug_images.append(flipped)
+        aug_annotations.append(flipped_boxes)
+
+        # Brightness jitter on the flipped copy
+        factor = np.random.uniform(0.75, 1.25)
+        bright = np.clip(flipped * factor, 0.0, 1.0)
+        aug_images.append(bright)
+        aug_annotations.append(flipped_boxes)
+
+    return np.array(aug_images, dtype=np.float32), aug_annotations

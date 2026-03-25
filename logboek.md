@@ -410,4 +410,46 @@ De volgende vier afbeeldingen zijn gegenereerd met `python predict.py --image te
 ![test1 predicted](outputs/plots/run10/test1_predicted.png)
 > Vrijwel elk stuk wordt correct gedetecteerd met confidence 1.00. Zwarte en witte stukken worden goed van elkaar onderscheiden. Het enige probleem is dat `black-bishop` consequent als `black-pawn` wordt gelabeld met 100% confidence. Alle andere klassen kloppen.
 
-**Conclusie:** de stap naar 640×640 heeft de mAP verhoogd van 0.904 naar 0.969. De accuracy van ~10% zegt niets over de detectiekwaliteit -dat is een bijwerking van de gridstructuur en hoe Keras accuracy berekent over continue sigmoid outputs. Het enige resterende probleem is de verwarring tussen `black-bishop` en `black-pawn`, waarschijnlijk doordat beide stukken donker zijn en in de trainingdata visueel op elkaar lijken.
+**Conclusie:** de stap naar 640×640 heeft de mAP verhoogd van 0.904 naar 0.969. De accuracy van ~10% zegt niets over de detectiekwaliteit - dat is een bijwerking van de gridstructuur en hoe Keras accuracy berekent over continue sigmoid outputs. Het enige resterende probleem is de verwarring tussen `black-bishop` en `black-pawn`, waarschijnlijk doordat beide stukken donker zijn en in de trainingdata visueel op elkaar lijken.
+
+---
+
+## Dag 8 - 24/03/26
+
+### Hogere class weight voor black-bishop
+
+**Wat:** `CLASS_WEIGHT_OVERRIDES` toegevoegd aan `config.py` met een extra vermenigvuldiger van ×3.0 voor `black-bishop`, bovenop de automatisch berekende inverse-frequency weight. In `train.py` wordt dit toegepast na de reguliere gewichtsberekening. `RUN_ID` verhoogd naar 11.
+
+**Waarom:** in run 10 werd `black-bishop` consequent als `black-pawn` geclassificeerd. Beide stukken zijn donker van kleur en lijken in sommige stijlen op elkaar. De automatische class weight compenseert al voor de klasse-onbalans, maar kennelijk niet genoeg om het model de vormverschillen te laten leren. Door de weight handmatig extra op te schalen weegt een fout op een bishop zwaarder mee in de loss, wat het model dwingt meer aandacht aan dat onderscheid te besteden.
+
+![Training](outputs/plots/run11/training_run11.png)
+> Loss daalt snel naar bijna 0 voor train. Validatieloss daalt maar heeft een spike rond epoch 50-75, waarna hij weer stabiliseert rond 0.4-0.5. Dit is waarschijnlijk het moment dat `ReduceLROnPlateau` de learning rate verlaagt. Accuracy blijft rond 10% - zelfde reden als run 10.
+
+![Confusion matrix](outputs/plots/run11/confusion_matrix_run11.png)
+> `black-bishop` scoort nu 32 correct met 2 fout naar `black-pawn` - was 30 correct en 4 fout in run 10. Verbetering maar niet volledig opgelost. Alle andere klassen zijn perfect of vrijwel perfect.
+
+![MAE](outputs/plots/run11/mae_run11.png)
+> Alle coordinaten verbeterd ten opzichte van run 10. x: 0.094 (was 0.110), y: 0.105 (was 0.110), w: 0.075 (was 0.067), h: 0.094 (was 0.119). De hogere class weight heeft de lokalisatie niet verslechterd.
+
+![mAP](outputs/plots/run11/map_run11.png)
+> mAP = 0.983 - gestegen van 0.969. `black-bishop` is nog steeds de laagste klasse maar duidelijk hoger dan in run 10.
+
+![Predictions](outputs/plots/run11/predictions_run11.png)
+>
+
+### Test op chess.com screenshot (run 11)
+
+![test1 predicted](outputs/plots/run11/test1_predicted.png)
+> Een van de twee bishops wordt nu correct gelabeld als `black-bishop`. De andere wordt nog steeds als `black-pawn` geclassificeerd. De blauwe `!` van de chess.com UI wordt nog steeds als stuk gedetecteerd - het model ziet een donker object op een cel en classificeert het, wat correct gedrag is vanuit het model gezien. Alle overige stukken kloppen.
+
+**Conclusie:** de ×3.0 multiplier heeft geholpen maar het bishop-probleem half opgelost. Volgende stap is de weight verder verhogen of overstappen op data augmentatie als structurele fix.
+
+### Data augmentatie - horizontale flip + brightness jitter
+
+**Wat:** `augment()` toegevoegd aan `preprocessing.py`. Elke trainingsafbeelding wordt horizontaal gespiegeld en er wordt een brightness-gevarieerde kopie van de gespiegelde versie aangemaakt (factor ×0.75-1.25). De trainingsset wordt hierdoor 3x zo groot. Augmentatie wordt alleen op traindata toegepast, niet op validatie of test. `RUN_ID` verhoogd naar 12.
+
+**Waarom:** de class weight aanpassing in run 11 loste het bishop-probleem maar half op. De hypothese was dat het model te weinig visuele variatie heeft gezien voor `black-bishop` - door augmentatie krijgt het model dezelfde stukken in meer variaties te zien, wat het onderscheid met `black-pawn` zou moeten verbeteren via vormherkenning in plaats van kleur.
+
+**Resultaat:** de augmentatie heeft het probleem niet opgelost. `black-bishop` wordt nog steeds consequent als `black-pawn` geclassificeerd. Dit wijst erop dat het probleem dieper zit dan variatie in belichting of spiegeling - de visuele stijl van de chess.com bishop lijkt voor het trainen en classificeren bij sommige images niet correct wil doen
+
+![test1 predicted run 12](outputs/plots/run12/test1_predicted.png)
