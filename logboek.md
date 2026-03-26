@@ -455,3 +455,87 @@ De volgende vier afbeeldingen zijn gegenereerd met `python predict.py --image te
 ![test1 predicted run 12](outputs/plots/run12/test1_predicted.png)
 
 ---
+
+## Dag 9 - 26/03/26
+
+### Classificator - opzet en implementatie
+
+**Context:** na run 12 blijft `black-bishop` hardnekkig verward worden met `black-pawn`. Class weights, augmentatie en extra trainingsruns hebben het probleem niet volledig opgelost. De hypothese is dat de detector én de classifier tegelijk te veel verantwoordelijkheid dragen -het model moet per gridcel zowel de positie als het type bepalen. Door classificatie los te trekken als een aparte tweede stap kan een dedicated model zich uitsluitend richten op het onderscheid tussen de 12 klassen zonder rekening te houden met bounding boxes of gridstructuur.
+
+**Aanpak:** de bestaande detector vindt de stukken. De classificator krijgt alle geknipt patches in één batch binnen en geeft per patch een klasselabel terug. Alle gedetecteerde crops worden gestapeld tot een array `(N, 64, 64, 3)` en in één `model.predict()` aanroep verwerkt -dit is efficiënter dan elk stuk apart door het model halen omdat de matrix-operaties in de Conv-lagen parallel lopen.
+
+De code staat in de map `classificator/` en heeft een eigen `RUN_ID`, een eigen outputstructuur en deelt alleen de onderliggende datasets met het hoofdproject.
+
+---
+
+### classificator/config.py
+
+Eigen configuratie los van de root `config.py`. Dezelfde `RUN_ID`-structuur als het hoofdproject: `PLOTS_DIR` wijst naar `classificator/outputs/plots/run{RUN_ID}/` en het model wordt opgeslagen als `classifier_run{RUN_ID}.h5`. Dataset-paden worden opgebouwd via `ROOT_DIR` zodat de locatie van de datasets niet hoeft te veranderen als de `classificator/` map verplaatst wordt.
+
+| Instelling | Waarde | Waarom |
+|------------|--------|--------|
+| `PATCH_SIZE` | 64 | Een uitgeknipte patch bevat nauwelijks achtergrond -64×64 is groot genoeg voor vormdetails en klein genoeg voor snelle training |
+| `BATCH_SIZE` | 32 | Standaard voor kleine modellen; past ruim in geheugen bij 64×64 patches |
+| `EPOCHS` | 30 | Classificatie convergeert sneller dan objectdetectie -30 epochs is een startpunt |
+
+---
+
+### classificator/data_loader.py
+
+Laadt de CSV-annotaties direct uit de bestaande datasets en knipt per bounding box een patch uit het originele beeld. De annotatieparsing is opnieuw geïmplementeerd in plaats van geïmporteerd uit de root `data_loader.py` -een directe import zou een naamconflict geven omdat Python anders de verkeerde `config.py` laadt.
+
+| Onderdeel | Waarom |
+|-----------|--------|
+| `cv2.imread()` | Laadt de originele afbeelding op volledige resolutie zodat de crop niet extra vervormd wordt door een eerdere resize |
+| `cv2.cvtColor(BGR→RGB)` | OpenCV laadt beelden standaard in BGR-volgorde; het model verwacht RGB zodat kleuren correct worden geleerd |
+| Array-slice `img[y1:y2, x1:x2]` | Direct uitknippen op de numpy array is sneller dan een aparte OpenCV-functie |
+| `cv2.resize()` naar 64×64 | Bounding boxes variëren in grootte; het model verwacht een vaste inputdimensie |
+| Normalisatie `/255.0` | Schaalt pixelwaarden naar \[0, 1\]; grote inputwaarden verstoren activaties in vroege lagen |
+| `plot_patch_verification()` | Slaat een grid op met voorbeeldpatches per klasse -controlemiddel om te zien of crops correct zijn uitgeknipt en gelabeld voordat het model traint |
+| `plot_class_distribution()` | Zelfde als in het hoofdproject: inzicht in klasse-imbalans voor de patch-dataset |
+
+---
+
+### classificator/model.py
+
+Simpel CNN voor classificatie. Geen gridoutput, geen bounding box regressie -alleen een softmax over 12 klassen.
+
+| Laag | Waarom |
+|------|--------|
+| Conv2D 32 filters, 3×3, ReLU | Leert basale vormen en randen in de 64×64 patch; 32 filters is genoeg voor zo'n kleine input |
+| MaxPooling 64→32 | Verkleint de feature map met factor 2; maakt het netwerk minder gevoelig voor kleine positieverschuivingen in de crop |
+| Conv2D 64 filters, 3×3, ReLU | Leert specifiekere vormen op basis van de eerder geleerde patronen |
+| MaxPooling 32→16 | Zelfde reden als eerste pooling |
+| Flatten | Zet de 16×16×64 feature map om naar een 1D vector van 16.384 waarden zodat de Dense lagen ermee kunnen werken |
+| Dense 128, ReLU | Combineert de features tot een compacte representatie vóór de eindclassificatie |
+| Dense 12 + softmax | Eindlaag met één neuron per klasse; softmax zorgt dat de outputs optellen tot 1 zodat ze als kansen geïnterpreteerd worden |
+
+Geen BatchNormalization of Dropout: het model is bewust minimaal gehouden. Die lagen voegen complexiteit toe die pas nodig is als overfitten aangetoond is in de resultaten.
+
+---
+
+### classificator/train.py
+
+Standaard Keras training, geen custom loss, geen callbacks.
+
+| Onderdeel | Waarom |
+|-----------|--------|
+| `optimizer='adam'` | Standaard Adam zonder aangepaste learning rate -de Keras default van `1e-3` is het startpunt; aanpassen als de trainingscurve instabiliteit toont |
+| `loss='sparse_categorical_crossentropy'` | Standaard loss voor multi-class classificatie waarbij labels integers zijn in plaats van one-hot vectoren. Geen custom loss nodig: er is geen locatiecomponent, het model hoeft alleen de juiste klasse te voorspellen |
+| `metrics=['accuracy']` | Directe metric voor classificatie -bij een gebalanceerde patch-dataset is accuracy hier informatief, anders dan bij de griddetectie waar accuracy misleidend was |
+
+De trainingscurve (loss + accuracy voor train en validatie) wordt opgeslagen als `training_run{RUN_ID}.png` in dezelfde stijl als het hoofdproject.
+
+---
+
+### classificator/evaluate.py
+
+Evalueert het getrainde model op de testset en slaat een confusion matrix op als `confusion_matrix_run{RUN_ID}.png`. Alle patches worden in één batch door `model.predict()` gestuurd, de argmax geeft het voorspelde klasselabel. Zelfde opmaak en naamgeving als de root `evaluate.py`.
+
+---
+
+### classificator/main.py
+
+Orkestreert de volledige pipeline in volgorde: data laden → patch verificatie opslaan → class distributie opslaan → model bouwen → trainen → confusion matrix opslaan. Output gaat naar `classificator/outputs/plots/run{RUN_ID}/` en `classificator/outputs/models/` zodat runs niet door elkaar lopen met het hoofdproject.
+
+---
