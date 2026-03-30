@@ -510,8 +510,6 @@ Simpel CNN voor classificatie. Geen gridoutput, geen bounding box regressie -all
 | Dense 128, ReLU | Combineert de features tot een compacte representatie vóór de eindclassificatie |
 | Dense 12 + softmax | Eindlaag met één neuron per klasse; softmax zorgt dat de outputs optellen tot 1 zodat ze als kansen geïnterpreteerd worden |
 
-Geen BatchNormalization of Dropout: het model is bewust minimaal gehouden. Die lagen voegen complexiteit toe die pas nodig is als overfitten aangetoond is in de resultaten.
-
 ---
 
 ### classificator/train.py
@@ -537,5 +535,200 @@ Evalueert het getrainde model op de testset en slaat een confusion matrix op als
 ### classificator/main.py
 
 Orkestreert de volledige pipeline in volgorde: data laden → patch verificatie opslaan → class distributie opslaan → model bouwen → trainen → confusion matrix opslaan. Output gaat naar `classificator/outputs/plots/run{RUN_ID}/` en `classificator/outputs/models/` zodat runs niet door elkaar lopen met het hoofdproject.
+
+---
+
+### classificator/predict.py - predict pipeline (run 15)
+
+**Wat is gebouwd:** een volledige predict-pipeline die een willekeurige schaakbord-screenshot als input neemt en per cel het aanwezige stuk classificeert. De aanpak wijkt fundamenteel af van de oude grid-detector: in plaats van het hele beeld door een CNN te sturen dat tegelijkertijd positie en klasse moet bepalen, wordt het probleem opgesplitst in drie losse stappen die elk een specifieke taak hebben. Dit maakt het systeem makkelijker te debuggen en te verbeteren.
+
+**De vijf stappen uitgelegd:**
+
+**Stap 1 - Board detection**
+`board_detector.crop_board_debug()` zoekt het schaakbord in het inputbeeld via Canny edge detection en contour-analyse. Canny markeert scherpe kleurovergangen als witte pixels. De code zoekt vervolgens naar de grootste rechthoekige contour in het beeld - dat is het bord. Met `getPerspectiveTransform` wordt de gevonden rechthoek rechtgetrokken naar een vlak 512x512 vierkant, ook als de foto schuin is genomen. Zonder deze correctie zouden de 64 cellen scheef worden uitgeknipt en zou de classifier op verkeerde pixels classificeren.
+
+**Stap 2 - Cell splitting**
+Het 512x512 bord wordt mechanisch opgedeeld in 64 gelijke cellen van elk 64x64 pixels (8 rijen x 8 kolommen). Dit werkt alleen correct als stap 1 een goed rechtgetrokken bord heeft opgeleverd - een scheef bord geeft scheefgesneden cellen.
+
+**Stap 3 - Piece detection per cel (voor de classifier)**
+Dit is de meest kritieke stap. Een classifier moet altijd een klasse kiezen - als elke lege cel ook door het model gaat, krijg je altijd 64 voorspellingen, ook voor lege velden. Dat zijn gegarandeerde false positives. Daarom wordt eerst per cel gecontroleerd of er visueel iets aanwezig is via twee onafhankelijke checks:
+
+- **Edge density check (Canny):** de cel wordt in grijswaarden omgezet en licht geblurred om ruis te dempen. Dan past Canny edge detection de drempel toe op 30-100. Het percentage edge-pixels wordt berekend. Een lege schaakcel is visueel vlak (alleen de kleur van het veld), een stuk heeft duidelijke contouren en interne lijnen. Drempel: als meer dan 6% van de pixels een edge is, wordt de cel als bezet gemarkeerd.
+
+- **Adaptive threshold blob check (center crop):** soms heeft een donker stuk op een donker veld weinig Canny-edges omdat het contrast laag is. Daarom wordt ook de centrale 75% van de cel apart geanalyseerd met een adaptieve threshold. Adaptive threshold berekent per klein pixelblok wat de lokale drempel is - dit werkt beter dan een globale drempel bij variabele belichting. Het resultaat is een zwart-wit beeld waar objecten als witte blobs verschijnen. Als een contour groter is dan 4% van het centrumoppervlak telt dat als stuk.
+
+Beide checks zijn onafhankelijk: als een van de twee positief is, wordt de cel als bezet beschouwd.
+
+**Stap 4 - Classificatie**
+Alleen de als bezet gemarkeerde cellen worden als batch door het classifier-model gestuurd. Ze worden eerst geresized naar `PATCH_SIZE x PATCH_SIZE` en genormaliseerd naar [0,1]. Alle patches worden gestapeld tot een array en in één `model.predict()` aanroep verwerkt - dit is efficiënter dan elke patch apart door het model te sturen.
+
+**Stap 5 - Output**
+Het resultaat wordt getekend over het gecropte bord. Per bezette cel wordt de 2-lettercode van het stuk en de confidence score getoond. De confidence komt rechtstreeks uit de softmax-output: een waarde dichtbij 1.0 betekent dat het model zeker is, een waarde rond 0.5 betekent dat het model twijfelt tussen meerdere klassen.
+
+**Debug output:** alle tussenliggende beelden worden opgeslagen in `classificator/outputs/plots/run15/` zodat het gedrag van elke stap los te controleren is zonder opnieuw te runnen.
+
+---
+
+#### Board detection debug (run 15)
+
+![Edges](classificator/outputs/plots/run15/predict_edges_run15.png)
+> Canny edge-beeld van het inputplaatje. Elke witte pixel is een gedetecteerde rand. Het bord is herkenbaar als een duidelijk rechthoekig patroon. De code zoekt naar de grootste vierhoekige contour in dit beeld om de hoekpunten van het bord te bepalen.
+
+![Contour](classificator/outputs/plots/run15/predict_contour_run15.png)
+> Het gedetecteerde bord-quadrilateraal getekend over het originele beeld. De groene lijn toont de gevonden contour. De rode stippen zijn de vier hoekpunten die worden doorgegeven aan `getPerspectiveTransform`. Als de stippen niet precies in de hoeken van het bord zitten, zal de crop scheef zijn.
+
+![Board](classificator/outputs/plots/run15/predict_board_run15.png)
+> Het gecropte en perspectief-gecorrigeerde bord (512x512 pixels). De perspectief-transformatie trekt het bord recht zodat alle 64 cellen exact even groot zijn na de splitsing. Dit is de directe input voor stap 2.
+
+---
+
+#### Cel-detectie debug (run 15)
+
+![Cells](classificator/outputs/plots/run15/predict_cells_run15.png)
+> Alle 64 cellen als 8x8 grid met het resultaat van de piece-detection stap. Groene rand = cel gemarkeerd als bezet en doorgestuurd naar de classifier. Rode rand = cel gemarkeerd als leeg en overgeslagen. Dit is het meest directe overzicht om te zien of de detectie correct werkt - te veel groene cellen op lege velden betekent dat de drempelwaarden te laag zijn.
+
+![Cells Edges](classificator/outputs/plots/run15/predict_cells_edges_run15.png)
+> De Canny edge-afbeelding per cel zoals het algoritme die intern ziet bij de edge density check. Cellen met een stuk tonen duidelijke witte lijnen langs de contouren van het stuk. Lege cellen zijn vrijwel geheel zwart omdat een vlak schaakbordveld weinig scherpe overgangen heeft. De gekleurde rand geeft het eindoordeel: groen als de cel bezet is bevonden, rood als leeg.
+
+![Cells Thresh](classificator/outputs/plots/run15/predict_cells_thresh_run15.png)
+> De adaptive threshold-afbeelding per cel, gebruikt als tweede check naast de edge density. Alleen het centrale 75% van de cel wordt geanalyseerd om ruis aan de celranden te vermijden - die randen zijn namelijk onderdeel van het schaakbordpatroon zelf en geen stukken. Witte blobs in het midden wijzen op de aanwezigheid van een stuk. Dit vangt met name donkere stukken op donkere cellen die weinig Canny-edges produceren.
+
+---
+
+#### Eindresultaat (run 15)
+
+![Classified](classificator/outputs/plots/run15/predict_classified_run15.png)
+> Het eindresultaat van de volledige pipeline. Per bezette cel staat de 2-lettercode van het voorspelde stuk (bb = black bishop, wp = white pawn, etc.) en de bijbehorende confidence. Cellen zonder stuk krijgen geen label. Dit is run 15 - het eerste werkende prototype van de cel-classifier aanpak.
+
+---
+
+## Run 16 - classificator
+
+**Wat is veranderd en waarom:**
+
+Run 15 was een werkend prototype met een klein model getraind op 64x64 patches in 30 epochs. Run 16 is de eerste serieuze poging om de nauwkeurigheid te verhogen door drie dingen tegelijk aan te pakken: grotere input, dieper netwerk en langer trainen.
+
+| Instelling | Run 15 | Run 16 | Reden |
+|------------|--------|--------|-------|
+| `PATCH_SIZE` | 64 | 80 | Meer pixels per patch = meer detail per stuk |
+| Conv blokken | 2 | 3 (32 - 64 - 128) | Dieper netwerk kan complexere vormen leren |
+| Dense | 128 | 256 | Grotere feature vector door dieper netwerk, Dense moet meescalen |
+| Dropout | nee | 0.3 voor Dense | Langer trainen vergroot kans op overfitting; Dropout corrigeert dit |
+| `BATCH_SIZE` | 32 | 16 | Kleinere batches geven ruisigere gradients, wat generalisatie licht verbetert |
+| `EPOCHS` | 30 | 100 | Met een dieper model en grotere input duurt convergentie langer |
+
+**Over PATCH_SIZE 64 naar 80:** een schaakstuk op een 64x64 patch bevat weinig pixels voor de fijnere details zoals de vorm van een bisschopsmijter versus een pion. Op 80x80 heeft het model meer pixels beschikbaar om onderscheid te maken. Dit is direct relevant voor het `black-bishop` vs `black-pawn` probleem dat door alle vorige runs heen speelt.
+
+**Over het derde conv blok:** in run 15 was de architectuur Conv(32) -> Pool -> Conv(64) -> Pool -> Flatten. Na twee pooling-stappen is de feature map 16x16. Op 80x80 input levert dat Conv(32) -> Pool(40) -> Conv(64) -> Pool(20) -> Conv(128) -> Pool(10) -> Flatten. Het extra blok kan op de 20x20 feature map nog specifiekere patronen leren voordat de informatie wordt samengevat. 128 filters in het derde blok is logisch: elk dieper blok leert complexere patronen en heeft daarvoor meer filters nodig.
+
+**Over Dropout 0.3:** Dropout zet tijdens het trainen willekeurig 30% van de neuronen in de Dense laag op nul per batch. Dit dwingt het netwerk om niet te leunen op een kleine groep neuronen maar de informatie te spreiden over het hele netwerk. Bij 100 epochs zonder Dropout zou het model de trainingsset kunnen memoriseren in plaats van generaliseren naar nieuwe beelden.
+
+---
+
+### Trainingscurve (run 16)
+
+![Training](classificator/outputs/plots/run16/training_run16.png)
+> De trainings- en validatiecurve voor loss en accuracy over 100 epochs. Een goed verlopende run laat beide curves dalen en stijgen in dezelfde richting zonder grote kloof ertussen. Een grote kloof tussen train en validatie duidt op overfitting.
+
+### Confusion matrix (run 16)
+
+![Confusion matrix](classificator/outputs/plots/run16/confusion_matrix_run16.png)
+> De confusion matrix toont voor elke combinatie van werkelijk label (rijen) en voorspeld label (kolommen) hoeveel testpatches er in die cel vallen. De diagonaal zijn correcte voorspellingen - hoe donkerder de diagonaal en hoe lichter de rest, hoe beter. Klassen die verward worden zijn zichtbaar als verhoogde waarden buiten de diagonaal.
+
+### Test op chess.com screenshot (run 16)
+
+![Classified](classificator/outputs/plots/run16/predict_classified_run16.png)
+> Eindresultaat van de predict-pipeline op een chess.com screenshot. Vergelijken met run 15 laat zien of de verbeteringen in het model ook doorwerken op een echt bord dat niet uit de trainingsset komt.
+
+---
+
+## Run 17 - classificator
+
+**Wijzigingen ten opzichte van run 16:**
+
+| Instelling | Run 16 | Run 17 | Reden |
+|------------|--------|--------|-------|
+| Activatie | ReLU | LeakyReLU (alpha=0.1) | ReLU kan neuronen permanent uitzetten bij negatieve input (dying ReLU); LeakyReLU laat een klein signaal door zodat neuronen actief blijven |
+| ModelCheckpoint | nee | ja, op `val_accuracy` | Slaat het beste model op tijdens training in plaats van het laatste; beschermt tegen overfitting aan het eind van de run |
+| `EPOCHS` | 100 | 150 | Meer ruimte voor het model om te convergeren nu checkpoint het beste moment bewaard |
+
+**LeakyReLU uitgelegd:** standaard ReLU geeft 0 terug voor alles kleiner dan 0. Als een neuron consequent negatieve input krijgt, leert het niets meer - het gradient is 0 en de gewichten worden niet meer bijgewerkt. Dit heet een "dead neuron". LeakyReLU geeft bij negatieve input een kleine waarde terug (0.1 × input) zodat het gradient nooit volledig nul wordt en alle neuronen blijven bijdragen aan het leerproces.
+
+---
+
+### Trainingscurve (run 17)
+
+![Training](classificator/outputs/plots/run17/training_run17.png)
+> De loss laat grote pieken zien rond epoch 60 en epoch 130. Dit duidt op instabiliteit in de learning rate - het model schiet voorbij een goed minimum. De ModelCheckpoint heeft desondanks het beste moment opgeslagen. De accuracy blijft hoog (boven 0.97) voor zowel train als validatie, wat aangeeft dat het model de patches goed leert classificeren.
+
+### Class distributie trainingsdata (run 17)
+
+![Class distribution](classificator/outputs/plots/run17/class_distribution_train_run17.png)
+> Dit is de kern van het bishop-probleem. `black-pawn` heeft 925 trainingssamples, `black-bishop` slechts 250 - een factor 3.7 verschil. Het model ziet tijdens training bijna 4x zo vaak een pion als een bisschop. Bij twijfel trekt het model daardoor altijd naar de meerderheidsklasse. Dit verklaart waarom de black-bishop consequent als black-pawn wordt geclassificeerd, ook na architectuur- en hyperparameter-aanpassingen.
+
+### Confusion matrix (run 17)
+
+![Confusion matrix](classificator/outputs/plots/run17/confusion_matrix_run17.png)
+> Op de testset: 31 van de ~34 black-bishops correct, 3 fout geclassificeerd als black-pawn. Op de trainingsdata presteert het model goed, maar op chess.com screenshots is de fout groter omdat de visuele stijl van de stukken verschilt van de trainingsdata. De pion-rij laat ook 3 patches zien die als bishop worden geclassificeerd, wat symmetrisch is - beide klassen trekken naar elkaar toe.
+
+### Patch verificatie (run 17)
+
+![Patch verification](classificator/outputs/plots/run17/patch_verification_run17.png)
+> Voorbeeldpatches per klasse uit de trainingsset. Rij 1 (black-bishop) toont donkere stukken met een puntige bovenkant - de bisschopsmijter. Rij 4 (black-pawn) toont kleinere donkere stukken met een ronde bovenkant. Visueel lijken ze op elkaar wanneer het bord laagresolutie is of de stijl afwijkt van de trainingsdata (zoals bij chess.com).
+
+### Test op chess.com screenshot (run 17)
+
+![Classified](classificator/outputs/plots/run17/predict_classified_run17.png)
+> De meeste stukken worden correct geclassificeerd. De black-bishop linksboven (a8) wordt nog steeds als `bp` (black-pawn) geclassificeerd met 0.80 confidence. De chess.com UI-knop (blauwe `!`) wordt ook nog steeds als stuk gedetecteerd - de piece-detection ziet het als een object maar het model classificeert het als pion.
+
+---
+
+### Analyse: waarom black-bishop blijft falen
+
+Het probleem heeft twee oorzaken die elkaar versterken:
+
+**1. Data-imbalans (hoofdoorzaak):** black-pawn heeft 925 trainingssamples, black-bishop 250. Het model wordt tijdens training 3.7x zo vaak gecorrigeerd op pion-fouten als op bishop-fouten. De loss-functie geeft elke klasse gelijk gewicht per sample, waardoor het model automatisch beter wordt in het herkennen van de meerderheidsklasse.
+
+**2. Visuele stijlkloof:** de trainingsdata bevat schaakstukken in een specifieke cartoon-stijl. Chess.com gebruikt een andere visuele stijl. Een black-bishop in de trainingsdata heeft een duidelijke puntige mijter; in de chess.com stijl is dat detail subtieler of anders weergegeven. Het model heeft die chess.com stijl nooit gezien tijdens training.
+
+**Fix voor run 18:** class weights toevoegen aan de loss-functie. Een class weight van 925/250 = 3.7 voor black-bishop compenseert de imbalans exact - elke bishop-fout weegt dan even zwaar als 3.7 pion-fouten in de loss. Dit is een directe, mathematisch verantwoorde correctie zonder extra data of architectuurwijzigingen.
+
+---
+
+## classificator/live.py - live schermdetectie
+
+**Wat:** een live pipeline die continu het scherm uitleest, het schaakbord detecteert en de stukken per cel classificeert. Het resultaat wordt getoond in een live venster dat zichzelf bijwerkt zonder dat je steeds handmatig een screenshot hoeft te maken.
+
+**Hoe het werkt:**
+
+1. `mss` legt het volledige primaire scherm vast als numpy array - dit is de snelste methode voor schermopname op Windows zonder extra afhankelijkheden.
+2. `crop_board_debug()` detecteert het bord via de bestaande Canny + contour pipeline en geeft het gecropte bord terug.
+3. Het bord wordt opgesplitst in 64 cellen, dezelfde logica als in `predict.py`.
+4. `has_piece()` en `classify_cells()` worden direct geimporteerd uit `predict.py` - geen gedupliceerde code.
+5. Het resultaat wordt getekend met OpenCV (`cv2.putText`, `cv2.rectangle`) in plaats van matplotlib, omdat OpenCV directe vensterweergave ondersteunt zonder bestand op te slaan.
+
+**Twee vensters:**
+
+| Venster | Inhoud |
+|---------|--------|
+| `Live board - classificator` | Het gecropte bord met stuk-labels en confidence per cel, bijgewerkt elke `--interval` seconden |
+| `Cell detection` | 8x8 grid van alle 64 cellen met groene of rode rand - toont wat de piece-detector ziet voor de classifier wordt aangeroepen |
+
+**Model selectie:** het script gebruikt `MODEL_SAVE_PATH` uit `config.py` als default. Dat wijst altijd naar het model van de huidige `RUN_ID`. Een ander model gebruik je via `--model outputs/models/classifier_run17.h5`.
+
+**Controls:**
+
+| Toets | Actie |
+|-------|-------|
+| `Q` | Stoppen |
+| `S` | Huidig frame opslaan naar `outputs/plots/run{RUN_ID}/live_snapshot.png` |
+
+**Gebruik:**
+```
+cd classificator
+python live.py
+python live.py --interval 0.5
+python live.py --model outputs/models/classifier_run17.h5
+```
 
 ---

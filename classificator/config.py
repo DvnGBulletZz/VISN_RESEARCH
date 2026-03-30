@@ -5,7 +5,7 @@ import os
 
 # ─── Run identifier ───────────────────────────────────────────────────────────
 
-RUN_ID = 15
+RUN_ID = 18
 
 # ─── Base directories ─────────────────────────────────────────────────────────
 
@@ -57,9 +57,9 @@ NUM_CLASSES  = len(CLASS_NAMES)
 
 # ─── Classifier instellingen ──────────────────────────────────────────────────
 
-PATCH_SIZE  = 64
-BATCH_SIZE  = 32
-EPOCHS      = 30
+PATCH_SIZE  = 80
+BATCH_SIZE  = 16
+EPOCHS      = 150
 
 # ─── Output ───────────────────────────────────────────────────────────────────
 

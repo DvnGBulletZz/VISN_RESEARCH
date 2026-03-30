@@ -5,10 +5,22 @@ from data_loader import load_patches, plot_patch_verification, plot_class_distri
 from model import build_model
 from train import train
 from evaluate import plot_confusion_matrix
+import tensorflow as tf
 
+
+def setup_gpu(mem_mb=19_456):
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        tf.config.set_logical_device_configuration(
+            gpus[0], [tf.config.LogicalDeviceConfiguration(memory_limit=mem_mb)])
+        print(f'GPU memory limited to {mem_mb} MB')
+    from tensorflow.keras import mixed_precision
+    mixed_precision.set_global_policy('mixed_float16')
+    print('Mixed precision: mixed_float16')
+
+setup_gpu()
 
 def main():
-    print("=== Chess piece classifier ===\n")
 
     print("[main] Data laden...")
     X_train, y_train = load_patches("train")

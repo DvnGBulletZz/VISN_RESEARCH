@@ -9,6 +9,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from tensorflow import keras
+from sklearn.utils.class_weight import compute_class_weight
 from config import BATCH_SIZE, EPOCHS, PLOTS_DIR, MODELS_DIR, MODEL_SAVE_PATH, RUN_ID
 
 
@@ -22,16 +24,26 @@ def train(model, X_train, y_train, X_val, y_val):
         metrics=['accuracy'],
     )
 
+    weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+    class_weight = dict(enumerate(weights))
+
+    checkpoint = keras.callbacks.ModelCheckpoint(
+        MODEL_SAVE_PATH,
+        monitor='val_accuracy',
+        save_best_only=True,
+        verbose=1,
+    )
+
     history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
         batch_size=BATCH_SIZE,
         epochs=EPOCHS,
+        class_weight=class_weight,
+        callbacks=[checkpoint],
         verbose=1,
     )
-
-    model.save(MODEL_SAVE_PATH)
-    print(f"[train] Model opgeslagen → {MODEL_SAVE_PATH}")
+    print(f"[train] Beste model opgeslagen → {MODEL_SAVE_PATH}")
 
     _plot_training(history)
     return history
