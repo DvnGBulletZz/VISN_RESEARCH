@@ -35,9 +35,7 @@ Beide sets zijn voor export al geresized naar 640x640 pixels via Roboflow. De an
 
 Door de twee sets samen te voegen ontstaat een gecombineerde dataset van circa 350 afbeeldingen voor training, validatie en test. Elke afbeelding bevat een volledig schaakbord met meerdere stukken tegelijk.
 
-Een structureel probleem in de data is klasse-imbalans. Op een schaakbord staan standaard 16 pionnen maar slechts 2 koningen, 2 lopers, 2 paarden en 2 torens per kleur. Dit verschil zit direct in de trainingsdata. Het model wordt tijdens training veel vaker gecorrigeerd op pionfouten dan op bisschopsfouten, waardoor het bij twijfel automatisch richting pion trekt. Dit probleem speelt in beide fases van het project een rol.
-
-De dataset is gemaakt in een specifieke cartoon-stijl met overdreven duidelijke vormen. Stukken op chess.com zien er visueel anders uit dan in de trainingsdata. Dit zorgt later voor generalisatieproblemen wanneer het model op echte chess.com screenshots wordt getest.
+Een structureel probleem in de data is klasse-imbalans. Op een schaakbord staan standaard 16 pawns maar slechts 2 kings, 2 bishops, 2 knights en 2 rooks per kleur. Dit verschil zit direct in de trainingsdata. Het model wordt tijdens training veel vaker gecorrigeerd op pawn-fouten dan op bishop-fouten, waardoor het bij twijfel automatisch richting pawn trekt. Dit probleem speelt in beide fases van het project een rol.
 
 ---
 
@@ -77,7 +75,7 @@ Detection head:
 Output:    20x20x17
 ```
 
-Het netwerk bestaat uit vijf opeenvolgende blokken. Elk blok leert patronen op een bepaald abstractieniveau: het eerste blok herkent basale randen en kleurgrenzen, latere blokken combineren die tot steeds complexere vormen zoals de puntpijl van een pion of de ronde bovenkant van een toren. Na elk blok halveert een MaxPooling laag de breedte en hoogte van de feature map, waardoor het netwerk steeds compacter maar informatierieker wordt.
+Het netwerk bestaat uit vijf opeenvolgende blokken. Elk blok leert patronen op een bepaald abstractieniveau: het eerste blok herkent basale randen en kleurgrenzen, latere blokken combineren die tot steeds complexere vormen zoals de puntige top van een pawn of de ronde bovenkant van een rook. Na elk blok halveert een MaxPooling laag de breedte en hoogte van de feature map, waardoor het netwerk steeds compacter maar informatierieker wordt.
 
 Na het laatste MaxPooling blok is de feature map precies 20x20 pixels groot, wat overeenkomt met de gewenste gridgrootte. De detectiehead zet deze 20x20 feature map direct om naar de outputtensor via twee 1x1 Conv lagen zonder Flatten of Dense lagen. Dit is cruciaal: door de ruimtelijke structuur te bewaren weet elke uitvoercel exact welke regio van het inputbeeld hij beschrijft.
 
@@ -103,7 +101,7 @@ De box loss berekent het gemiddeld kwadraat van het verschil tussen de voorspeld
 
 De confidence loss is asymmetrisch opgezet. Bij een 20x20 raster zijn de meeste cellen leeg. Als lege en gevulde cellen even zwaar wegen, domineert het signaal "er staat niets" de gehele training en leert het model nooit om stukken te detecteren. Door gevulde cellen 20 keer zo zwaar te laten wegen als lege cellen (10 tegenover 0.5) wordt het model veel harder bijgestuurd op gevallen waar het een stuk mist of verkeerd plaatst.
 
-Class weights corrigeren voor de klasse-imbalans in de data: zeldzamere klassen zoals de koning krijgen een hoger gewicht zodat een fout op een koning even hard meetelt als meerdere fouten op pionnen.
+Class weights corrigeren voor de klasse-imbalans in de data: zeldzamere klassen zoals de king krijgen een hoger gewicht zodat een fout op een king even hard meetelt als meerdere fouten op pawns.
 
 ---
 
@@ -246,7 +244,7 @@ Dense 12  + softmax
 Output: 12 klassewaarden die optellen tot 1.0
 ```
 
-Het model heeft drie opeenvolgende Conv-MaxPool blokken. Elk blok halveert de spatiale dimensie terwijl het aantal filters verdubbelt. Het eerste blok (32 filters) leert basale vormen zoals randen en ronde vlakken. Het tweede blok (64 filters) combineert die tot specifiekere patronen zoals de punt van een bisschopsmijter. Het derde blok (128 filters) werkt op de 20x20 feature map en leert de meest complexe kenmerken die stukken van elkaar onderscheiden.
+Het model heeft drie opeenvolgende Conv-MaxPool blokken. Elk blok halveert de spatiale dimensie terwijl het aantal filters verdubbelt. Het eerste blok (32 filters) leert basale vormen zoals randen en ronde vlakken. Het tweede blok (64 filters) combineert die tot specifiekere patronen zoals de punt van een bishop's mitre. Het derde blok (128 filters) werkt op de 20x20 feature map en leert de meest complexe kenmerken die stukken van elkaar onderscheiden.
 
 Na het laatste pooling blok is de feature map 10x10 met 128 kanalen. Flatten zet dat om naar een vector van 11.520 waarden. Dropout zet 30% van die waarden willekeurig op nul tijdens elke trainingsstap, wat voorkomt dat het model leunt op een kleine groep neuronen en zo overfitting vermindert. De Dense laag met 256 neuronen comprimeert de vector naar een compacte representatie. De laatste Dense laag met 12 neuronen en softmax geeft de uiteindelijke klassekansverdeling.
 
@@ -258,7 +256,7 @@ Het model gebruikt bewust geen residual blokken of BatchNorm, in tegenstelling t
 
 | Instelling | Waarde | Reden |
 |---|---|---|
-| Optimizer | Adam (lr 0.001) | Standaard en stabiel startpunt voor classificatietaken |
+| Optimizer | Adam | Standaard en stabiel startpunt voor classificatietaken |
 | Loss | sparse categorical crossentropy | Standaard voor multi-class classificatie met integer labels |
 | PATCH_SIZE | 80 | Meer pixels per cel geeft meer detail voor subtiele onderscheidingen |
 | BATCH_SIZE | 16 | Kleinere batches geven iets ruisigere gradients wat generalisatie licht verbetert |
@@ -290,7 +288,7 @@ Het eindresultaat van de volledige fase 2 pipeline op een echte chess.com screen
 
 Per bezette cel staat de 2-lettercode van het voorspelde stuk (bb = black bishop, wp = white pawn, wk = white king enzovoort) en de bijbehorende confidence score. Een confidence van 1.00 betekent dat het model volledig zeker is. Een lagere waarde zoals 0.80 betekent dat er enige onzekerheid is.
 
-De meeste stukken worden correct geclassificeerd met hoge confidence. De black-bishop linksboven op cel a8 wordt geclassificeerd als bp (black-pawn) met een confidence van 0.80. Het model is dus tamelijk zeker van zijn verkeerde antwoord, wat aangeeft dat de chess.com bisschop visueel dicht bij een pion ligt in wat het model heeft geleerd. De blauwe chess.com interface-knop wordt ook als stuk opgepikt door de piece-detector en geclassificeerd als pion.
+De meeste stukken worden correct geclassificeerd met hoge confidence. De black-bishop linksboven op cel a8 wordt geclassificeerd als bp (black-pawn) met een confidence van 0.80. Het model is dus tamelijk zeker van zijn verkeerde antwoord, wat aangeeft dat de chess.com bishop visueel dicht bij een pawn ligt in wat het model heeft geleerd. De blauwe chess.com interface-knop wordt ook als stuk opgepikt door de piece-detector en geclassificeerd als pawn.
 
 ---
 
@@ -315,7 +313,7 @@ De grid-detector is een completere aanpak: het model leert zelf localisatie en h
 
 Beide systemen classificeren de black-bishop op chess.com als black-pawn. De oorzaak is geen verkeerde architectuur of slechte hyperparameters.
 
-**De visuele stijlkloof:** de trainingsdata bevat schaakstukken in een cartoon-stijl met overdreven duidelijke en grote vormen. De bisschopsmijter is overduidelijk puntig, de pion heeft een ronde kop. Op chess.com zijn beide stukken donkere silhouetten waarbij de fijnere vormverschillen subtieler zijn. Het model heeft de chess.com stijl van een black-bishop nooit gezien tijdens training en kan het verschil niet maken.
+**De visuele stijlkloof:** de trainingsdata bevat schaakstukken in een cartoon-stijl met overdreven duidelijke en grote vormen. De bishop's mitre is overduidelijk puntig, de pawn heeft een ronde kop. Op chess.com zijn beide stukken donkere silhouetten waarbij de fijnere vormverschillen subtieler zijn. Het model heeft de chess.com stijl van een black-bishop nooit gezien tijdens training en kan het verschil niet maken.
 
 Dit verklaart ook waarom white-bishop geen probleem geeft. Witte stukken hebben meer contrast en de white-bishop heeft een klein kruisje bovenop dat in elke visuele stijl duidelijk herkenbaar is. Het onderscheid is robuuster dan bij donkere silhouetten op donkere achtergronden.
 
